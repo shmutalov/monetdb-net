@@ -3,6 +3,8 @@ Microsoft Visual Studio Solution File, Format Version 9.00
 # Visual C# Express 2005
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonetDb", "MonetDb\MonetDb.csproj", "{EA1DAC72-FCD8-4766-85B0-129DCBF2FA22}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonetDbTest", "MonetDbTest\MonetDbTest.csproj", "{C723F41E-ADAD-4B3F-943C-D01E35BC78D0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -13,6 +15,10 @@ Global
 		{EA1DAC72-FCD8-4766-85B0-129DCBF2FA22}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EA1DAC72-FCD8-4766-85B0-129DCBF2FA22}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EA1DAC72-FCD8-4766-85B0-129DCBF2FA22}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C723F41E-ADAD-4B3F-943C-D01E35BC78D0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C723F41E-ADAD-4B3F-943C-D01E35BC78D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C723F41E-ADAD-4B3F-943C-D01E35BC78D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C723F41E-ADAD-4B3F-943C-D01E35BC78D0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
