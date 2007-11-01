@@ -5,34 +5,83 @@ using System.Data;
 
 namespace MonetDb
 {
+    /// <summary>
+    /// Represents an open connection with an MonetDB server.
+    /// </summary>
     public class MonetDbConnection : IDbConnection
     {
+        /// <summary>
+        /// Initializes a new connection with the MonetDB server.
+        /// </summary>
         public MonetDbConnection()
         { }
 
+        /// <summary>
+        /// Initializes a new connection with the MonetDB server.
+        /// </summary>
+        /// <param name="connectionString">
+        /// The information used to establish a connection.  
+        /// See <c>ConnectionString</c> for the valid formatting of this parameter.
+        /// </param>
         public MonetDbConnection(string connectionString)
         {
             if (string.IsNullOrEmpty(connectionString))
                 throw new ArgumentNullException("connectionString", "connectionString cannot be null");
 
             ConnectionString = connectionString;
+            _connectionState = ConnectionState.Closed;
         }
-
+        /// <summary>
+        /// Begins a database transaction with the specified <c>IsolationLevel</c> value.
+        /// </summary>
+        /// <param name="il">One of the <c>IsolationLevel</c> values.</param>
+        /// <returns></returns>
         public IDbTransaction BeginTransaction(IsolationLevel il)
         {
-            throw new Exception("The method or operation is not implemented.");
+            if (_connection.Ptr == IntPtr.Zero || _connectionState != ConnectionState.Open)
+                throw new InvalidOperationException("Connection is not open");
+
+            return null;
         }
 
+        /// <summary>
+        /// Begins a database transaction.
+        /// </summary>
+        /// <returns></returns>
         public IDbTransaction BeginTransaction()
         {
-            throw new Exception("The method or operation is not implemented.");
+            return BeginTransaction(IsolationLevel.ReadUncommitted);
         }
 
+        /// <summary>
+        /// Changes the current database for an open MonetDbConnection object.
+        /// </summary>
+        /// <param name="databaseName">
+        /// The name of the database to use in place of the current database.
+        /// </param>
         public void ChangeDatabase(string databaseName)
         {
-            throw new Exception("The method or operation is not implemented.");
+            bool reopen = false;
+            if (_connection.Ptr != IntPtr.Zero && _connectionState == ConnectionState.Open)
+            {
+                Close();
+                reopen = true;
+            }
+
+            string[] connectionStringChunks = ConnectionString.Split(';');
+            for (int i = 0; i < connectionStringChunks.Length; i++)
+                if (connectionStringChunks[i].StartsWith("database=", StringComparison.InvariantCultureIgnoreCase))
+                    connectionStringChunks[i] = "database=" + databaseName;
+
+            ConnectionString = string.Join(";", connectionStringChunks);
+
+            if (reopen)
+                Open();
         }
 
+        /// <summary>
+        /// Releases the connection back to the connection pool.
+        /// </summary>
         public void Close()
         {
             if (_connection.Ptr != IntPtr.Zero)
@@ -40,11 +89,13 @@ namespace MonetDb
                 MonetDbConnectionFactory.CloseConnection(_connection);
                 _connection.Ptr = IntPtr.Zero;
             }
+
+            _connectionState = ConnectionState.Closed;
         }
 
         private string _connectionString;
         /// <summary>
-        /// The connection string used to connect to the MonetDB server.  
+        /// Gets or sets the string used to open a database.
         /// </summary>
         /// <example>host=localhost;port=50000;username=admin;password=sa;database=demo;ssl=false</example>
         public string ConnectionString
@@ -63,34 +114,64 @@ namespace MonetDb
             }
         }
 
+        /// <summary>
+        /// Gets the time to wait while trying to establish a connection before terminating the attempt and generating an error.
+        /// </summary>
         public int ConnectionTimeout
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return 60; }
         }
 
+        /// <summary>
+        /// Creates and returns a Command object associated with the connection.
+        /// </summary>
+        /// <returns></returns>
         public IDbCommand CreateCommand()
         {
             throw new Exception("The method or operation is not implemented.");
         }
 
+        /// <summary>
+        /// Gets the name of the current database or the database to be used after a connection is opened.
+        /// </summary>
         public string Database
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return _dbname; }
         }
 
+        /// <summary>
+        /// Opens a database connection with the settings specified by the <c>ConnectionString</c> property 
+        /// of the provider-specific Connection object.
+        /// </summary>
         public void Open()
         {
+            _connectionState = ConnectionState.Connecting;
+
+            if (string.IsNullOrEmpty(ConnectionString))
+            {
+                _connectionState = ConnectionState.Closed;
+                throw new InvalidOperationException("ConnectionString has not been set.  Cannot connect to database.");
+            }
+
             if (_connection.Ptr == IntPtr.Zero)
                 _connection = MonetDbConnectionFactory.GetConnection(_host, _port, _username, _password, _dbname, _useSsl);
             else
                 throw new InvalidOperationException("Connection is already open");
+
+            _connectionState = ConnectionState.Open;
         }
 
+        /// <summary>
+        /// Gets the current state of the connection.
+        /// </summary>
         public ConnectionState State
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return _connectionState; }
         }
 
+        /// <summary>
+        /// Releases the connection back to the connection pool.
+        /// </summary>
         public void Dispose()
         {
             Close();
@@ -156,5 +237,7 @@ namespace MonetDb
         private bool _useSsl;
 
         private MapiConnection _connection;
+
+        private ConnectionState _connectionState;
     }
 }
