@@ -1,3 +1,20 @@
+/*
+ * The contents of this file are subject to the MonetDB Public License
+ * Version 1.1 (the "License"); you may not use this file except in
+ * compliance with the License. You may obtain a copy of the License at
+ * http://monetdb.cwi.nl/Legal/MonetDBLicense-1.1.html
+ * 
+ * Software distributed under the License is distributed on an "AS IS"
+ * basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See the
+ * License for the specific language governing rights and limitations
+ * under the License.
+ * 
+ * The Original Code is MonetDB .NET Client Library.
+ * 
+ * The Initial Developer of the Original Code is Tim Gebhardt <tim@gebhardtcomputing.com>.
+ * Portions created by Tim Gebhardt are Copyright (C) 2007. All Rights Reserved.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -17,7 +34,7 @@ namespace MonetDbTest
         /// the "Getting Started" instructions on the MonetDB website will set up the environment 
         /// correctly for these tests to run.
         /// </summary>
-        public static string TestConnectionString = "host=localhost;port=50000;username=voc;password=voc;database=demo;ssl=false";
+        public static string TestConnectionString = "host=127.0.0.1;port=50000;username=voc;password=voc;database=demo;ssl=false;";
 
         [Test]
         public void TestConnect()
@@ -39,10 +56,21 @@ namespace MonetDbTest
             conn.Close();
             Assert.IsTrue(conn.State == System.Data.ConnectionState.Closed);
             Assert.AreEqual(conn.Database, "demo");
-            
-            conn = new MonetDbConnection(TestConnectionString.Replace("ssl=false", "ssl=true"));
-            conn.Open();
-            conn.Close();
+
+            try
+            {
+                conn = new MonetDbConnection(TestConnectionString.Replace("ssl=false", "ssl=true"));
+                conn.Open();
+            }
+            catch (MonetDbException ex)
+            {
+                if (ex.Message.IndexOf("not supported", StringComparison.InvariantCultureIgnoreCase) < 0)
+                    throw;
+            }
+            finally
+            {
+                conn.Close();
+            }
         }
 
         [Test]
@@ -59,21 +87,17 @@ namespace MonetDbTest
             new MonetDbConnection(TestConnectionString.Replace("port=50000", "port"));
         }
 
-        /// <summary>
-        /// Connecting to a non-existant database works if there is only one database.
-        /// </summary>
         [Test]
         public void TestConnectWrongDatabase()
         {
-            MonetDbConnection conn = new MonetDbConnection("host=localhost;port=50000;username=voc;password=voc;database=wrong;ssl=true");
-            conn.Open();
+            MonetDbConnection conn = new MonetDbConnection("host=localhost;port=50000;username=voc;password=voc;database=wrong");
         }
 
         [Test]
         [ExpectedException(typeof(ArgumentException))]
         public void TestConnectNoDatabase()
         {
-            new MonetDbConnection("host=localhost;port=50000;username=voc;password=voc;ssl=true");
+            new MonetDbConnection("host=localhost;port=50000;username=voc;password=voc");
         }
 
         [Test]
@@ -86,6 +110,7 @@ namespace MonetDbTest
         }
 
         [Test]
+        [ExpectedException(typeof(MonetDbException), UserMessage="This should throw a message that the database doesn't exist, but it's successfully changing the database name and reconnecting if it's doing so")]
         public void TestChangeDatabase()
         {
             MonetDbConnection conn = new MonetDbConnection(TestConnectionString);
@@ -93,9 +118,6 @@ namespace MonetDbTest
             Assert.IsTrue(conn.State == System.Data.ConnectionState.Open);
 
             conn.ChangeDatabase("somethingelse");
-            Assert.IsTrue(conn.State == System.Data.ConnectionState.Open);
-            Assert.AreEqual(conn.ConnectionString, TestConnectionString.Replace("database=demo", "database=somethingelse"));
-            conn.Close();
         }
         
     }

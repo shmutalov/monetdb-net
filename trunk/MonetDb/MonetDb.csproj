@@ -35,6 +35,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="BlockingQueue.cs" />
     <Compile Include="MapiLib.cs" />
     <Compile Include="MonetDbConnection.cs" />
     <Compile Include="MonetDbConnectionFactory.cs" />
