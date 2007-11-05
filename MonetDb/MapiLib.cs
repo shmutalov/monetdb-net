@@ -1,3 +1,20 @@
+/*
+ * The contents of this file are subject to the MonetDB Public License
+ * Version 1.1 (the "License"); you may not use this file except in
+ * compliance with the License. You may obtain a copy of the License at
+ * http://monetdb.cwi.nl/Legal/MonetDBLicense-1.1.html
+ * 
+ * Software distributed under the License is distributed on an "AS IS"
+ * basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See the
+ * License for the specific language governing rights and limitations
+ * under the License.
+ * 
+ * The Original Code is MonetDB .NET Client Library.
+ * 
+ * The Initial Developer of the Original Code is Tim Gebhardt <tim@gebhardtcomputing.com>.
+ * Portions created by Tim Gebhardt are Copyright (C) 2007. All Rights Reserved.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,10 +27,12 @@ namespace MonetDb
 
     internal struct MapiConnection
     {
-        public IntPtr Ptr;
-        public MapiConnection(IntPtr ptr)
+        public readonly IntPtr Ptr;
+        public readonly int Port;
+        public MapiConnection(IntPtr ptr, int port)
         {
             Ptr = ptr;
+            Port = port;
         }
     }
 
@@ -39,6 +58,63 @@ namespace MonetDb
 
     internal class MapiLib
     {
+        private class MarshalPtrToUtf8 : ICustomMarshaler
+        {
+            static MarshalPtrToUtf8 marshaler = new MarshalPtrToUtf8();
+
+            public void CleanUpManagedData(object ManagedObj)
+            {
+
+            }
+
+            public void CleanUpNativeData(IntPtr pNativeData)
+            {
+                Marshal.Release(pNativeData);
+            }
+
+            public int GetNativeDataSize()
+            {
+                return Marshal.SizeOf(typeof(byte));
+            }
+
+            public int GetNativeDataSize(IntPtr ptr)
+            {
+                int size = 0;
+                for (size = 0; Marshal.ReadByte(ptr, size) > 0; size++)
+                    ;
+                return size;
+            }
+
+            public IntPtr MarshalManagedToNative(object ManagedObj)
+            {
+                if (ManagedObj == null)
+                    return IntPtr.Zero;
+                if (ManagedObj.GetType() != typeof(string))
+                    throw new ArgumentException("ManagedObj", "Can only marshal type of System.String");
+                byte[] array = Encoding.UTF8.GetBytes((string)ManagedObj);
+                int size = Marshal.SizeOf(array[0]) * array.Length + Marshal.SizeOf(array[0]);
+                IntPtr ptr = Marshal.AllocHGlobal(size);
+                Marshal.Copy(array, 0, ptr, array.Length);
+                Marshal.WriteByte(ptr, size - 1, 0);
+                return ptr;
+            }
+
+            public object MarshalNativeToManaged(IntPtr pNativeData)
+            {
+                if (pNativeData == IntPtr.Zero)
+                    return null;
+                int size = GetNativeDataSize(pNativeData);
+                byte[] array = new byte[size];
+                Marshal.Copy(pNativeData, array, 0, size);
+                return Encoding.UTF8.GetString(array);
+            }
+
+            public static ICustomMarshaler GetInstance(string cookie)
+            {
+                return marshaler;
+            }
+        }
+
         #region Connecting and Disconnecting
 
         /// <summary>
@@ -59,7 +135,9 @@ namespace MonetDb
         /// <returns></returns>
         public static MapiConnection MapiConnect(string host, int port, string username, string password, string lang, string dbname)
         {
-            return new MapiConnection(CMapiLib.mapi_connect(host, port, username, password, lang, dbname));
+            return new MapiConnection(
+                CMapiLib.mapi_connect(host, port, username, password, lang, dbname),
+                port);
         }
 
         /// <summary>
@@ -76,7 +154,9 @@ namespace MonetDb
         /// <returns></returns>
         public static MapiConnection MapiConnectSsl(string host, int port, string username, string password, string lang, string dbname)
         {
-            return new MapiConnection(CMapiLib.mapi_connect_ssl(host, port, username, password, lang, dbname));
+            return new MapiConnection(
+                CMapiLib.mapi_connect_ssl(host, port, username, password, lang, dbname),
+                port);
         }
 
         /// <summary>
@@ -386,14 +466,14 @@ namespace MonetDb
         public static string[] MapiFetchFieldArray(MapiHdl hdl)
         {
             IntPtr pptr = CMapiLib.mapi_fetch_field_array(hdl.Ptr);
-            IntPtr ptr = Marshal.ReadIntPtr(pptr);   
+            IntPtr ptr = Marshal.ReadIntPtr(pptr);
             List<string> exploded = new List<string>();
             do
             {
-                exploded.Add(Marshal.PtrToStringAuto(ptr));
+                exploded.Add(MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(ptr) as string);
                 pptr = new IntPtr((int)pptr + IntPtr.Size);
                 ptr = Marshal.ReadIntPtr(pptr);
-            } while(ptr != IntPtr.Zero);
+            } while (ptr != IntPtr.Zero);
             return exploded.ToArray();
         }
 
@@ -407,7 +487,7 @@ namespace MonetDb
         /// <returns></returns>
         public static string MapiFetchField(MapiHdl hdl, int fnr)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_fetch_field(hdl.Ptr, fnr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_fetch_field(hdl.Ptr, fnr)) as string;
         }
 
         /// <summary>
@@ -441,7 +521,7 @@ namespace MonetDb
         /// <returns></returns>
         public static string MapiErrorString(MapiConnection mid)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_error_str(mid.Ptr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_error_str(mid.Ptr)) as string;
         }
 
         /// <summary>
@@ -451,7 +531,7 @@ namespace MonetDb
         /// <returns></returns>
         public static string MapiResultError(MapiHdl hdl)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_result_error(hdl.Ptr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_result_error(hdl.Ptr)) as string;
         }
 
         /// <summary>
@@ -486,7 +566,7 @@ namespace MonetDb
         {
             return new MapiMsg(CMapiLib.mapi_explain_result(hdl.Ptr, fs.SafeFileHandle));
         }
-    
+
         #endregion
 
         #region Parameters
@@ -589,7 +669,7 @@ namespace MonetDb
         /// <returns></returns>
         public static string MapiQuote(string str, int size)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_quote(str, size));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_quote(str, size)) as string;
         }
 
         /// <summary>
@@ -600,7 +680,7 @@ namespace MonetDb
         /// <returns></returns>
         public static string MapiUnquote(string str)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_unquote(str));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_unquote(str)) as string;
         }
 
         /// <summary>
@@ -642,17 +722,17 @@ namespace MonetDb
 
         public static string MapiGetName(MapiHdl hdl, int fnr)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_name(hdl.Ptr, fnr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_name(hdl.Ptr, fnr)) as string;
         }
 
         public static string MapiGetType(MapiHdl hdl, int fnr)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_type(hdl.Ptr, fnr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_type(hdl.Ptr, fnr)) as string;
         }
 
         public static string MapiGetTable(MapiHdl hdl, int fnr)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_table(hdl.Ptr, fnr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_table(hdl.Ptr, fnr)) as string;
         }
 
         public static int MapiGetlen(MapiConnection mid, int fnr)
@@ -662,27 +742,27 @@ namespace MonetDb
 
         public static string MapiGetDbName(MapiConnection mid)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_dbname(mid.Ptr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_dbname(mid.Ptr)) as string;
         }
 
         public static string MapiGetHost(MapiConnection mid)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_host(mid.Ptr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_host(mid.Ptr)) as string;
         }
 
         public static string MapiGetUser(MapiConnection mid)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_user(mid.Ptr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_user(mid.Ptr)) as string;
         }
 
         public static string MapiGetLang(MapiConnection mid)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_lang(mid.Ptr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_lang(mid.Ptr)) as string;
         }
 
         public static string MapiGetMotd(MapiConnection mid)
         {
-            return Marshal.PtrToStringAuto(CMapiLib.mapi_get_motd(mid.Ptr));
+            return MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(CMapiLib.mapi_get_motd(mid.Ptr)) as string;
         }
 
         /// <summary>
@@ -697,7 +777,7 @@ namespace MonetDb
             List<string> exploded = new List<string>();
             do
             {
-                exploded.Add(Marshal.PtrToStringAuto(ptr));
+                exploded.Add(MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(ptr) as string);
                 pptr = new IntPtr((int)pptr + IntPtr.Size);
                 ptr = Marshal.ReadIntPtr(pptr);
             } while (ptr != IntPtr.Zero);
@@ -717,7 +797,7 @@ namespace MonetDb
             List<string> exploded = new List<string>();
             do
             {
-                exploded.Add(Marshal.PtrToStringAuto(ptr));
+                exploded.Add(MarshalPtrToUtf8.GetInstance(null).MarshalNativeToManaged(ptr) as string);
                 pptr = new IntPtr((int)pptr + IntPtr.Size);
                 ptr = Marshal.ReadIntPtr(pptr);
             } while (ptr != IntPtr.Zero);
@@ -730,23 +810,23 @@ namespace MonetDb
         {
             #region Connecting and Disconnecting
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_connect(
-                [MarshalAs(UnmanagedType.LPTStr)]string host,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string host,
                 int port,
-                [MarshalAs(UnmanagedType.LPTStr)]string username,
-                [MarshalAs(UnmanagedType.LPTStr)]string password,
-                [MarshalAs(UnmanagedType.LPTStr)]string lang,
-                [MarshalAs(UnmanagedType.LPTStr)]string dbname);
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string username,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string password,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string lang,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string dbname);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_connect_ssl(
-                [MarshalAs(UnmanagedType.LPTStr)]string host,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string host,
                 int port,
-                [MarshalAs(UnmanagedType.LPTStr)]string username,
-                [MarshalAs(UnmanagedType.LPTStr)]string password,
-                [MarshalAs(UnmanagedType.LPTStr)]string lang,
-                [MarshalAs(UnmanagedType.LPTStr)]string dbname);
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string username,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string password,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string lang,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string dbname);
 
             [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_disconnect(IntPtr mid);
@@ -764,50 +844,50 @@ namespace MonetDb
 
             #region Sending Queries
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_query(
                 IntPtr mid,
-                [MarshalAs(UnmanagedType.LPTStr)]string command);
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string command);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_query_handle(
                 IntPtr hdl,
-                [MarshalAs(UnmanagedType.LPTStr)]string command);
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string command);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll", CharSet = CharSet.Ansi)]
             public static extern IntPtr mapi_query_array(
                 IntPtr mid,
-                [MarshalAs(UnmanagedType.LPTStr)]string command,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string command,
                 [In, Out]string[] argv);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_quick_query(
                 IntPtr mid,
-                [MarshalAs(UnmanagedType.LPTStr)]string command,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string command,
                 Microsoft.Win32.SafeHandles.SafeFileHandle fd);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll", CharSet = CharSet.Ansi)]
             public static extern IntPtr mapi_quick_query_array(
                 IntPtr mid,
-                [MarshalAs(UnmanagedType.LPTStr)]string command,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string command,
                 [In, Out]string[] argv,
                 Microsoft.Win32.SafeHandles.SafeFileHandle fd);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_stream_query(
                 IntPtr mid,
-                [MarshalAs(UnmanagedType.LPTStr)]string command,
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string command,
                 int windowsize);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_prepare(
                 IntPtr mid,
-                [MarshalAs(UnmanagedType.LPTStr)]string command);
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string command);
 
             [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_execute(IntPtr hdl);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll", CharSet = CharSet.Ansi)]
             public static extern IntPtr mapi_execute_array(
                 IntPtr hdl,
                 [In, Out]string[] argv);
@@ -815,7 +895,7 @@ namespace MonetDb
             [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_finish(IntPtr hdl);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll", CharSet = CharSet.Ansi)]
             public static extern IntPtr mapi_virtual_result(
                 IntPtr hdl,
                 int columns,
@@ -890,11 +970,11 @@ namespace MonetDb
 
             #region Parameters
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll", CharSet = CharSet.Ansi)]
             public static extern IntPtr mapi_bind(
                 IntPtr hdl,
                 int fldnr,
-                [MarshalAs(UnmanagedType.LPTStr)]string[] val);
+                [In, Out]string[] val);
 
             [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_clear_bindings(IntPtr hdl);
@@ -918,11 +998,14 @@ namespace MonetDb
             [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_cache_freeup(IntPtr hdl, int percentage);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
-            public static extern IntPtr mapi_quote([MarshalAs(UnmanagedType.LPTStr)]string str, int size);
+            [DllImport("libMapi.dll")]
+            public static extern IntPtr mapi_quote(
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string str, 
+                int size);
 
             [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
-            public static extern IntPtr mapi_unquote([MarshalAs(UnmanagedType.LPTStr)]string name);
+            public static extern IntPtr mapi_unquote(
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string str);
 
             [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_trace(IntPtr mid, int flag);
@@ -931,43 +1014,45 @@ namespace MonetDb
             public static extern int mapi_get_trace(IntPtr mid);
 
             [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
-            public static extern IntPtr mapi_trace_log(IntPtr mid, [MarshalAs(UnmanagedType.LPTStr)]string fname);
+            public static extern IntPtr mapi_trace_log(
+                IntPtr mid, 
+                [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(MarshalPtrToUtf8))]string fname);
 
             #endregion
 
             #region Data Structure Wrappers
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_name(IntPtr hdl, int fnr);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_type(IntPtr hdl, int fnr);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_table(IntPtr hdl, int fnr);
 
             [DllImport("libMapi.dll")]
             public static extern int mapi_get_len(IntPtr mid, int fnr);
-            
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_dbname(IntPtr mid);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_host(IntPtr mid);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_user(IntPtr mid);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_lang(IntPtr mid);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_get_motd(IntPtr mid);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_tables(IntPtr mid);
 
-            [DllImport("libMapi.dll", CharSet = CharSet.Auto)]
+            [DllImport("libMapi.dll")]
             public static extern IntPtr mapi_fields(IntPtr mid);
 
             #endregion

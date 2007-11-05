@@ -1,3 +1,20 @@
+/*
+ * The contents of this file are subject to the MonetDB Public License
+ * Version 1.1 (the "License"); you may not use this file except in
+ * compliance with the License. You may obtain a copy of the License at
+ * http://monetdb.cwi.nl/Legal/MonetDBLicense-1.1.html
+ * 
+ * Software distributed under the License is distributed on an "AS IS"
+ * basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See the
+ * License for the specific language governing rights and limitations
+ * under the License.
+ * 
+ * The Original Code is MonetDB .NET Client Library.
+ * 
+ * The Initial Developer of the Original Code is Tim Gebhardt <tim@gebhardtcomputing.com>.
+ * Portions created by Tim Gebhardt are Copyright (C) 2007. All Rights Reserved.
+ */
+
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -41,7 +58,7 @@ namespace MonetDb
             if (_connection.Ptr == IntPtr.Zero || _connectionState != ConnectionState.Open)
                 throw new InvalidOperationException("Connection is not open");
 
-            return null;
+            throw new NotImplementedException("This is not implemented yet");
         }
 
         /// <summary>
@@ -62,7 +79,7 @@ namespace MonetDb
         public void ChangeDatabase(string databaseName)
         {
             bool reopen = false;
-            if (_connection.Ptr != IntPtr.Zero && _connectionState == ConnectionState.Open)
+            if (_connectionState == ConnectionState.Open)
             {
                 Close();
                 reopen = true;
@@ -87,7 +104,6 @@ namespace MonetDb
             if (_connection.Ptr != IntPtr.Zero)
             {
                 MonetDbConnectionFactory.CloseConnection(_connection);
-                _connection.Ptr = IntPtr.Zero;
             }
 
             _connectionState = ConnectionState.Closed;
@@ -97,7 +113,7 @@ namespace MonetDb
         /// <summary>
         /// Gets or sets the string used to open a database.
         /// </summary>
-        /// <example>host=localhost;port=50000;username=admin;password=sa;database=demo;ssl=false</example>
+        /// <example>host=localhost;port=50000;username=admin;password=sa;database=demo;ssl=false;poolMinimum=3;poolMaximum=20</example>
         public string ConnectionString
         {
             get
@@ -145,6 +161,9 @@ namespace MonetDb
         /// </summary>
         public void Open()
         {
+            if (_connectionState == ConnectionState.Open)
+                throw new InvalidOperationException("Connection is already open");
+
             _connectionState = ConnectionState.Connecting;
 
             if (string.IsNullOrEmpty(ConnectionString))
@@ -153,10 +172,8 @@ namespace MonetDb
                 throw new InvalidOperationException("ConnectionString has not been set.  Cannot connect to database.");
             }
 
-            if (_connection.Ptr == IntPtr.Zero)
-                _connection = MonetDbConnectionFactory.GetConnection(_host, _port, _username, _password, _dbname, _useSsl);
-            else
-                throw new InvalidOperationException("Connection is already open");
+            _connection = MonetDbConnectionFactory.GetConnection(_host, _port, _username, _password,
+                                                                 _dbname, _useSsl, _minPoolConnections, _maxPoolConnections);
 
             _connectionState = ConnectionState.Open;
         }
@@ -181,10 +198,13 @@ namespace MonetDb
         {
             _host = _username = _password = _dbname = null;
             _port = 0;
+            _useSsl = false;
 
-            foreach (string setting in connectionString.Split(';'))
+            int tempPoolMin, tempPoolMax;
+
+            foreach (string setting in connectionString.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
             {
-                string[] key_value = setting.Split('=');
+                string[] key_value = setting.Split(new char[] { '=' }, StringSplitOptions.RemoveEmptyEntries);
                 if (key_value.Length != 2)
                 {
                     throw new ArgumentException(
@@ -218,6 +238,30 @@ namespace MonetDb
                                 "ConnectionString");
                         }
                         break;
+                    case "poolminimum": 
+                        if (!int.TryParse(value, out tempPoolMin))
+                        {
+                            throw new ArgumentException(
+                                string.Format("poolminimum is not a valid integer: {0}", value),
+                                "ConnectionString");
+                        }
+                        else if (tempPoolMin > _minPoolConnections)
+                        {
+                            _minPoolConnections = tempPoolMin;
+                        }
+                        break;
+                    case "poolmaximum": 
+                        if (!int.TryParse(value, out tempPoolMax))
+                        {
+                            throw new ArgumentException(
+                                string.Format("poolmaximum is not a valid integer: {0}", value),
+                                "ConnectionString");
+                        }
+                        else if (tempPoolMax > _maxPoolConnections)
+                        {
+                            _maxPoolConnections = tempPoolMax;
+                        }
+                        break;
                     default:
                         break;
                 }
@@ -235,6 +279,8 @@ namespace MonetDb
         private string _password;
         private string _dbname;
         private bool _useSsl;
+        private int _minPoolConnections = 3;
+        private int _maxPoolConnections = 20;
 
         private MapiConnection _connection;
 
