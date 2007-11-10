@@ -119,6 +119,27 @@ namespace MonetDbTest
 
             conn.ChangeDatabase("somethingelse");
         }
-        
+
+        [Test]
+        public void TestConnectionPooling()
+        {
+            //This test is intended to be run through a debugger and see if the connection pooling is 
+            //dynamically creating and destroying the connection pools.
+            //Only run this test, because the other tests will mess up the connection pool settings...
+            //I know it's not very TDD and this is a code smell, but this is pretty standard fare for
+            //database connectivity.
+            string modifiedConnString = TestConnectionString + "poolminimum=1;poolmaximum=5;";
+            MonetDbConnection[] conns = new MonetDbConnection[5];
+            for (int i = 0; i < conns.Length; i++)
+            {
+                conns[i] = new MonetDbConnection(modifiedConnString);
+                conns[i].Open();
+            }
+
+            for (int i = 0; i < conns.Length; i++)
+            {
+                conns[i].Close();
+            }
+        }
     }
 }

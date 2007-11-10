@@ -19,6 +19,8 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Timers;
+using System.IO;
+using System.Net.Sockets;
 
 namespace MonetDb
 {
@@ -54,7 +56,9 @@ namespace MonetDb
                     {
                         for (int i = 0; i < ci.Active.Count + ci.Busy.Count - ci.Min && ci.Active.Count > 0; i++)
                         {
-                            MapiLib.MapiDestroy(ci.Active.Dequeue());
+                            MapiSocket socket = ci.Active.Peek();
+                            if (socket.Created > DateTime.Now.AddMinutes(5))
+                                socket.Close();
                         }
                     }
                 }
@@ -76,7 +80,7 @@ namespace MonetDb
                     {
                         for (int i = 0; i < ci.Active.Count + ci.Busy.Count; i++)
                         {
-                            MapiLib.MapiDestroy(ci.Active.Dequeue(60000));
+                            ci.Active.Dequeue(60000).Close();
                         }
                     }
                 }
@@ -95,7 +99,7 @@ namespace MonetDb
         /// <param name="maxConn"></param>
         /// <param name="minConn"></param>
         /// <returns></returns>
-        public static MapiConnection GetConnection(string host, int port, string username, string password,
+        public static MapiSocket GetConnection(string host, int port, string username, string password,
                                                    string database, bool useSsl, int minConn, int maxConn)
         {
             if (minConn < 1)
@@ -114,7 +118,7 @@ namespace MonetDb
                 info = _connectionInfo[key];
             }
 
-            MapiConnection retval;
+            MapiSocket retval;
             lock (info)
             {
                 retval = info.Active.Dequeue();
@@ -123,14 +127,9 @@ namespace MonetDb
             return retval;
         }
 
-        public static void CloseConnection(MapiConnection connection)
+        public static void CloseConnection(MapiSocket socket, string database)
         {
-            string host = MapiLib.MapiGetHost(connection);
-            int port = connection.Port;
-            string username = MapiLib.MapiGetUser(connection);
-            string database = MapiLib.MapiGetDbName(connection);
-
-            string key = GetConnectionPoolKey(host, connection.Port, username, database);
+            string key = GetConnectionPoolKey(socket.Host, socket.Port, socket.Username, database);
 
             ConnectionInformation info;
             lock (_connectionInfo)
@@ -140,8 +139,8 @@ namespace MonetDb
 
             lock (info)
             {
-                info.Busy.Remove(connection);
-                info.Active.Enqueue(connection);
+                info.Busy.Remove(socket);
+                info.Active.Enqueue(socket);
             }
         }
 
@@ -156,24 +155,24 @@ namespace MonetDb
                     info = _connectionInfo[key] = new ConnectionInformation(minConn, maxConn);
             }
 
+            if (useSsl)
+                throw new MonetDbException("SSL Connections not supported by this client library.");
+
             lock (info)
             {
                 for (int i = info.Active.Count + info.Busy.Count; i < info.Min || (info.Active.Count == 0 && i < info.Max); i++)
                 {
-                    MapiConnection connection;
-                    if (useSsl)
-                        connection = MapiLib.MapiConnectSsl(host, port, username, password, "sql", database);
-                    else
-                        connection = MapiLib.MapiConnect(host, port, username, password, "sql", database);
-
-                    MapiMsg message = MapiLib.MapiError(connection);
-                    if(message.Ptr != IntPtr.Zero)
+                    try
                     {
-                        string error = MapiLib.MapiErrorString(connection);
-                        throw new MonetDbException(error);
+                        MapiSocket socket = new MapiSocket();
+                        socket.Connect(host, port, username, password, database);
+                        info.Active.Enqueue(socket);
                     }
-
-                    info.Active.Enqueue(connection);
+                    catch (IOException ex)
+                    {
+                        throw new MonetDbException(ex, "Problem connecting to the MonetDB server.");
+                    }
+                    
                 }
             }
         }
@@ -185,8 +184,8 @@ namespace MonetDb
 
         private class ConnectionInformation
         {
-            public BlockingQueue<MapiConnection> Active = new BlockingQueue<MapiConnection>();
-            public List<MapiConnection> Busy = new List<MapiConnection>();
+            public BlockingQueue<MapiSocket> Active = new BlockingQueue<MapiSocket>();
+            public List<MapiSocket> Busy = new List<MapiSocket>();
             public int Min, Max;
 
             public ConnectionInformation(int min, int max)
@@ -195,5 +194,7 @@ namespace MonetDb
                 Max = max;
             }
         }
+
+        
     }
 }
