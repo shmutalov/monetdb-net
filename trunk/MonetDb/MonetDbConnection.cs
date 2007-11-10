@@ -55,7 +55,7 @@ namespace MonetDb
         /// <returns></returns>
         public IDbTransaction BeginTransaction(IsolationLevel il)
         {
-            if (_connection.Ptr == IntPtr.Zero || _connectionState != ConnectionState.Open)
+            if (_connectionState != ConnectionState.Open)
                 throw new InvalidOperationException("Connection is not open");
 
             throw new NotImplementedException("This is not implemented yet");
@@ -101,10 +101,8 @@ namespace MonetDb
         /// </summary>
         public void Close()
         {
-            if (_connection.Ptr != IntPtr.Zero)
-            {
-                MonetDbConnectionFactory.CloseConnection(_connection);
-            }
+            if(_socket != null)
+                MonetDbConnectionFactory.CloseConnection(_socket, Database);
 
             _connectionState = ConnectionState.Closed;
         }
@@ -172,8 +170,8 @@ namespace MonetDb
                 throw new InvalidOperationException("ConnectionString has not been set.  Cannot connect to database.");
             }
 
-            _connection = MonetDbConnectionFactory.GetConnection(_host, _port, _username, _password,
-                                                                 _dbname, _useSsl, _minPoolConnections, _maxPoolConnections);
+            _socket = MonetDbConnectionFactory.GetConnection(_host, _port, _username, _password,
+                                                             _dbname, _useSsl, _minPoolConnections, _maxPoolConnections);
 
             _connectionState = ConnectionState.Open;
         }
@@ -194,6 +192,16 @@ namespace MonetDb
             Close();
         }
 
+        /// <summary>
+        /// Returns the number of rows affected in an SQL UPDATE/DELETE/INSERT query
+        /// </summary>
+        /// <returns></returns>
+        internal int GetRowsAffected()
+        {
+            throw new NotImplementedException("this is not implemented yet");
+            //return MapiLib.MapiRowsAffected(_socket);
+        }
+
         private void ParseConnectionString(string connectionString)
         {
             _host = _username = _password = _dbname = null;
@@ -211,7 +219,7 @@ namespace MonetDb
                         string.Format("ConnectionString is not well-formed: {0}", setting), "ConnectionString");
                 }
 
-                string key = key_value[0].ToLowerInvariant();
+                string key = key_value[0].ToLowerInvariant().Trim();
                 string value = key_value[1];
 
                 switch (key)
@@ -238,7 +246,7 @@ namespace MonetDb
                                 "ConnectionString");
                         }
                         break;
-                    case "poolminimum": 
+                    case "poolminimum":
                         if (!int.TryParse(value, out tempPoolMin))
                         {
                             throw new ArgumentException(
@@ -250,7 +258,7 @@ namespace MonetDb
                             _minPoolConnections = tempPoolMin;
                         }
                         break;
-                    case "poolmaximum": 
+                    case "poolmaximum":
                         if (!int.TryParse(value, out tempPoolMax))
                         {
                             throw new ArgumentException(
@@ -282,7 +290,7 @@ namespace MonetDb
         private int _minPoolConnections = 3;
         private int _maxPoolConnections = 20;
 
-        private MapiConnection _connection;
+        private MapiSocket _socket;
 
         private ConnectionState _connectionState;
     }

@@ -36,10 +36,14 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BlockingQueue.cs" />
-    <Compile Include="MapiLib.cs" />
+    <Compile Include="MapiSocket.cs" />
+    <Compile Include="MonetDbCommand.cs" />
     <Compile Include="MonetDbConnection.cs" />
     <Compile Include="MonetDbConnectionFactory.cs" />
+    <Compile Include="MonetDbDataReader.cs" />
     <Compile Include="MonetDbException.cs" />
+    <Compile Include="MonetDbParameterCollection.cs" />
+    <Compile Include="MonetDbTransaction.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
