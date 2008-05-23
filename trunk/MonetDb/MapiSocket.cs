@@ -7,10 +7,30 @@ using System.Text;
 
 namespace MonetDb
 {
+
+    class MonetDBQueryResponseInfo
+    {
+        public int id;
+        public int columnCount;
+        public int rowCount;
+        public int tupleCount;
+        public int recordsAffected;
+        public List<MonetDBColumnInfo> columns;
+        public IEnumerable<List<string>> data;
+    }
+
+    class MonetDBColumnInfo
+    {
+        public string name;
+        public string dataType;
+        public string tableName;
+        public int length;
+    }
+
     /// <summary>
     /// Represents the types of data sequences that can be returned from a MonetDB server.
     /// </summary>
-    internal enum MonetDbLineType
+    public enum MonetDbLineType
     {
         /// <summary>
         /// "there is currently no line", or the the type is unknown
@@ -125,10 +145,15 @@ namespace MonetDb
             }
 
             if (redirects.Count > 0)
+            {
+                _socket.Client.Close();
+                _socket.Close();
                 return FollowRedirects(redirects, username, password);
+            }
             else
                 return warnings;
         }
+
 
         private string _database;
         public string Database
@@ -174,6 +199,15 @@ namespace MonetDb
             if (FromDatabase != null && _socket.Connected)
                 FromDatabase.Close();
             _socket.Close();
+        }
+
+
+        internal IEnumerable<MonetDBQueryResponseInfo> ExecuteSQL(string sql)
+        {
+            _toDatabase.Write("s" + sql + ";\n");
+            _toDatabase.Flush();
+            MonetDBResultEnumerator re = new MonetDBResultEnumerator(_fromDatabase);
+            return re.GetResults();
         }
 
         /// <summary>
@@ -278,6 +312,138 @@ namespace MonetDb
                 retval[i] = bytes[i].ToString("X2");
             return string.Join("", retval);
         }
+
+        /// <summary>
+        /// This class process the stream into enumerated list of the MonetDBQueryResponseInfo objects which represent executed
+        /// statements in the batch. IEnumerable is used to facilitate lazy execution and eliminate the need in materialization
+        /// of the results returned by the server.
+        /// </summary>
+        private class MonetDBResultEnumerator
+        {
+            private string _temp;
+            private StreamReader _stream;
+
+            public MonetDBResultEnumerator(StreamReader stream)
+            {
+                _stream = stream;
+            }
+
+            private IEnumerable<List<string>> GetRows()
+            {
+                while (_temp[0] == '[')
+                {
+                    yield return SplitDataInColumns(_temp);
+                    _temp = _stream.ReadLine();
+                }
+            }
+
+
+            internal MonetDBQueryResponseInfo GetQueryResponseInfo(string s)
+            {
+                string[] s_parts = s.Substring(1).Split(new char[] { ' ' });
+                switch (s_parts[0])
+                {
+                    case "1":
+                    case "5":
+                        {
+                            MonetDBQueryResponseInfo qri = new MonetDBQueryResponseInfo();
+                            qri.id = int.Parse(s_parts[1]);
+                            qri.tupleCount = int.Parse(s_parts[2]);
+                            qri.columnCount = int.Parse(s_parts[3]);
+                            qri.rowCount = int.Parse(s_parts[4]);
+                            return qri;
+                        }
+                }
+                return new MonetDBQueryResponseInfo();
+            }
+
+            internal static IEnumerable<string> SplitCommaTabs(string s)
+            {
+                foreach (string v in s.Split(new char[] { ',' }))
+                    yield return v.Trim(' ', '\t');
+            }
+
+            internal static IEnumerable<string> ExtractValuesList(string s, string start, string end)
+            {
+                int startIndex = s.IndexOf(start);
+                int endIndex = s.IndexOf(end);
+                return SplitCommaTabs(s.Substring(startIndex + 1, endIndex - startIndex - 1));
+            }
+
+            internal static KeyValuePair<string, List<string>> SplitColumnInfoLine(string s)
+            {
+                return new KeyValuePair<string, List<string>>(s.Substring(s.IndexOf('#') + 1).Trim(), new List<string>(ExtractValuesList(s, "%", "#")));
+            }
+
+            internal static List<string> SplitDataInColumns(string s)
+            {
+                return new List<string>(ExtractValuesList(s, "[", "]"));
+            }
+
+            internal static List<MonetDBColumnInfo> GetColumnInfo(List<string> header_info)
+            {
+                List<MonetDBColumnInfo> list = new List<MonetDBColumnInfo>();
+                foreach (string s in header_info)
+                {
+                    KeyValuePair<string, List<string>> r = SplitColumnInfoLine(s);
+                    if (list.Count == 0)
+                        foreach (string ci in r.Value)
+                            list.Add(new MonetDBColumnInfo());
+
+                    for (int i = 0; i < r.Value.Count; i++)
+                    {
+                        switch (r.Key)
+                        {
+                            case "table_name":
+                                list[i].tableName = r.Value[i];
+                                break;
+                            case "name":
+                                list[i].name = r.Value[i];
+                                break;
+                            case "type":
+                                list[i].dataType = r.Value[i];
+                                break;
+                            case "length":
+                                list[i].length = int.Parse(r.Value[i]);
+                                break;
+                        }
+                    }
+                }
+                return list;
+            }
+
+
+            public IEnumerable<MonetDBQueryResponseInfo> GetResults()
+            {
+                _temp = _stream.ReadLine();
+                do
+                {
+                    MonetDBQueryResponseInfo ri = new MonetDBQueryResponseInfo();
+                    List<string> header_info = new List<string>();
+                    while (_temp != "." && _temp[0] != '[')
+                    {
+                        switch (_temp[0])
+                        {
+                            case '&':
+                                ri = GetQueryResponseInfo(_temp);
+                                break;
+                            case '%':
+                                header_info.Add(_temp);
+                                break;
+                            case '!':
+                                throw new MonetDbException("Error! " + _temp.Substring(1));
+                        }
+                        _temp = _stream.ReadLine();
+                    }
+
+                    ri.columns = GetColumnInfo(header_info);
+                    ri.data = GetRows();
+                    yield return ri;
+                } while (_temp != ".");
+                _stream = null;
+            }
+        }
+
 
         /// <summary>
         /// The MonetDB server has it's own protocol for streaming chunked input and output.
@@ -410,7 +576,7 @@ namespace MonetDb
                 byte[] blockHeader = new byte[2];
                 if (_monetStream.Read(blockHeader, 0, blockHeader.Length) != 2)
                     throw new MonetDbException(new InvalidDataException("Invalid block header length"), "Error reading data from MonetDB server");
-                _readLength = ((blockHeader[0] & 0xFF) >> 1 | (blockHeader[1] & 0xFF << 7));
+                _readLength = ((blockHeader[0] & 0xFF) >> 1 | (((short)blockHeader[1] & 0xFF) << 7));
                 _lastReadBlock = (blockHeader[0] & 0x1) == 1;
                 int read = 0;
                 while (read < _readLength)

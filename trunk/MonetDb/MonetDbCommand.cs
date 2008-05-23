@@ -23,6 +23,7 @@ namespace MonetDb
         /// </summary>
         /// <param name="cmdText"></param>
         public MonetDbCommand(string cmdText)
+            : this()
         {
             CommandText = cmdText;
         }
@@ -120,7 +121,26 @@ namespace MonetDb
         /// <returns></returns>
         public int ExecuteNonQuery()
         {
-            throw new NotImplementedException("this is not implemented yet");
+            int cnt = 0;
+            using (MonetDbDataReader dr = new MonetDbDataReader(ExecuteCommand(), Connection as MonetDbConnection))
+            {
+                do
+                {
+                    cnt += dr.RecordsAffected;
+                } while (dr.NextResult());
+            }
+            return cnt;
+        }
+
+        private IEnumerable<MonetDBQueryResponseInfo> ExecuteCommand()
+        {
+            if (Connection.State != ConnectionState.Open)
+                throw new MonetDbException("Connection is closed");
+            StringBuilder sb = new StringBuilder(CommandText);
+            foreach (MonetDbParameter p in Parameters)
+                ApplyParameter(sb, new KeyValuePair<string, string>(p.ParameterName, p.GetProperParameter()));
+
+            return (Connection as MonetDbConnection).ExecuteSQL(sb.ToString());
         }
 
         /// <summary>
@@ -130,7 +150,7 @@ namespace MonetDb
         /// <returns></returns>
         public IDataReader ExecuteReader(CommandBehavior behavior)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return new MonetDbDataReader(ExecuteCommand(), Connection as MonetDbConnection);
         }
 
         /// <summary>
@@ -142,6 +162,43 @@ namespace MonetDb
             return ExecuteReader(CommandBehavior.Default);
         }
 
+
+
+        private StringBuilder ApplyParameter(StringBuilder sb, KeyValuePair<string, string> p)
+        {
+            int quoteSingle = 0;
+            int quoteDouble = 0;
+            char[] param = p.Key.ToCharArray();
+            int i = 0;
+            while (i < sb.Length)
+            {
+                char cur = sb[i];
+                if (cur == '\'')
+                    quoteSingle++;
+                if (cur == '\"')
+                    quoteDouble++;
+                if (quoteDouble + quoteSingle == 0)
+                {
+                    bool found = true;
+                    for (int j = 0; j < param.Length; j++)
+                        if (param[j] != sb[i + j])
+                        {
+                            found = false;
+                            break;
+                        }
+                    if (found)
+                    {
+                        sb.Remove(i, param.Length);
+                        sb.Insert(i, p.Value);
+                        i--;
+                    }
+                }
+                i++;
+            }
+            return sb;
+        }
+
+
         /// <summary>
         /// Executes the query, and returns the first column of the first row in the resultset 
         /// returned by the query. Extra columns or rows are ignored.
@@ -149,7 +206,13 @@ namespace MonetDb
         /// <returns></returns>
         public object ExecuteScalar()
         {
-            throw new Exception("The method or operation is not implemented.");
+            using (IDataReader dr = ExecuteReader())
+            {
+                if (dr.Read())
+                    return dr[0];
+                return null;
+            }
+
         }
 
         private MonetDbParameterCollection _parameters;
@@ -166,7 +229,7 @@ namespace MonetDb
         /// </summary>
         public void Prepare()
         {
-            throw new NotImplementedException("this is not implemented yet");
+
         }
 
         private IDbTransaction _transaction;
@@ -204,7 +267,7 @@ namespace MonetDb
         /// </summary>
         public void Dispose()
         {
-            throw new NotImplementedException("this is not implemented yet");
+
         }
 
         #endregion
