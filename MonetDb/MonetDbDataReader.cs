@@ -10,6 +10,21 @@ namespace MonetDb
     /// </summary>
     public class MonetDbDataReader : IDataReader
     {
+        bool isOpen = true;
+        MonetDBQueryResponseInfo _ri;
+        IEnumerable<MonetDBQueryResponseInfo> eri;
+        IEnumerator<MonetDBQueryResponseInfo> enum_ri;
+        IEnumerator<List<string>> enumerator;
+        MonetDbConnection _con;
+
+        internal MonetDbDataReader(IEnumerable<MonetDBQueryResponseInfo> ri, MonetDbConnection con)
+        {
+            _con = con;
+            this.eri = ri;
+            this.enum_ri = ri.GetEnumerator();
+            this.NextResult();
+        }
+
         #region IDataReader Members
 
         /// <summary>
@@ -17,7 +32,7 @@ namespace MonetDb
         /// </summary>
         public void Close()
         {
-            throw new Exception("The method or operation is not implemented.");
+            Dispose();
         }
 
         /// <summary>
@@ -34,7 +49,8 @@ namespace MonetDb
         /// <returns></returns>
         public DataTable GetSchemaTable()
         {
-            throw new Exception("The method or operation is not implemented.");
+            return _con.GetObjectSchema(_ri.columns);
+
         }
 
         /// <summary>
@@ -42,7 +58,7 @@ namespace MonetDb
         /// </summary>
         public bool IsClosed
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return isOpen == false; }
         }
 
         /// <summary>
@@ -51,7 +67,10 @@ namespace MonetDb
         /// <returns></returns>
         public bool NextResult()
         {
-            throw new Exception("The method or operation is not implemented.");
+            bool flag = enum_ri.MoveNext();
+            _ri = enum_ri.Current;
+            enumerator = _ri.data.GetEnumerator();
+            return flag;
         }
 
         /// <summary>
@@ -60,7 +79,7 @@ namespace MonetDb
         /// <returns></returns>
         public bool Read()
         {
-            throw new Exception("The method or operation is not implemented.");
+            return enumerator.MoveNext();
         }
 
         /// <summary>
@@ -68,7 +87,7 @@ namespace MonetDb
         /// </summary>
         public int RecordsAffected
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return _ri.recordsAffected; }
         }
 
         #endregion
@@ -80,7 +99,12 @@ namespace MonetDb
         /// </summary>
         public void Dispose()
         {
-            throw new Exception("The method or operation is not implemented.");
+            while (enum_ri.MoveNext())
+            {
+                while (enumerator.MoveNext()) ;
+                enumerator.Dispose();
+            }
+            enum_ri.Dispose();
         }
 
         #endregion
@@ -92,7 +116,7 @@ namespace MonetDb
         /// </summary>
         public int FieldCount
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return _ri.columnCount; }
         }
 
         /// <summary>
@@ -112,7 +136,7 @@ namespace MonetDb
         /// <returns></returns>
         public byte GetByte(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return (byte)GetInt16(i);
         }
 
         /// <summary>
@@ -136,7 +160,7 @@ namespace MonetDb
         /// <returns></returns>
         public char GetChar(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return enumerator.Current[i][0];
         }
 
         /// <summary>
@@ -170,7 +194,7 @@ namespace MonetDb
         /// <returns></returns>
         public string GetDataTypeName(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return _ri.columns[i].dataType;
         }
 
         /// <summary>
@@ -190,7 +214,7 @@ namespace MonetDb
         /// <returns></returns>
         public decimal GetDecimal(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return decimal.Parse(enumerator.Current[i]);
         }
 
         /// <summary>
@@ -200,7 +224,7 @@ namespace MonetDb
         /// <returns></returns>
         public double GetDouble(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return double.Parse(enumerator.Current[i]);
         }
 
         /// <summary>
@@ -220,7 +244,7 @@ namespace MonetDb
         /// <returns></returns>
         public float GetFloat(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return float.Parse(enumerator.Current[i]);
         }
 
         /// <summary>
@@ -230,7 +254,7 @@ namespace MonetDb
         /// <returns></returns>
         public Guid GetGuid(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return new Guid(enumerator.Current[i]);
         }
 
         /// <summary>
@@ -240,7 +264,7 @@ namespace MonetDb
         /// <returns></returns>
         public short GetInt16(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return short.Parse(enumerator.Current[i]);
         }
 
         /// <summary>
@@ -250,7 +274,7 @@ namespace MonetDb
         /// <returns></returns>
         public int GetInt32(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return int.Parse(enumerator.Current[i]);
         }
 
         /// <summary>
@@ -260,7 +284,7 @@ namespace MonetDb
         /// <returns></returns>
         public long GetInt64(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return long.Parse(enumerator.Current[i]);
         }
 
         /// <summary>
@@ -270,7 +294,7 @@ namespace MonetDb
         /// <returns></returns>
         public string GetName(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return _ri.columns[i].name;
         }
 
         /// <summary>
@@ -280,7 +304,7 @@ namespace MonetDb
         /// <returns></returns>
         public int GetOrdinal(string name)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return _ri.columns.FindIndex(delegate(MonetDBColumnInfo ci) { return (ci.name == name); });
         }
 
         /// <summary>
@@ -290,7 +314,7 @@ namespace MonetDb
         /// <returns></returns>
         public string GetString(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return enumerator.Current[i];
         }
 
         /// <summary>
@@ -300,7 +324,27 @@ namespace MonetDb
         /// <returns></returns>
         public object GetValue(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            if (IsDBNull(i))
+                return DBNull.Value;
+            switch (_ri.columns[i].dataType)
+            {
+                case "smallint":
+                    return GetInt16(i);
+                case "int":
+                    return GetInt32(i);
+                case "bigint":
+                    return GetInt64(i);
+                case "double":
+                    return GetDouble(i);
+                case "real":
+                    return GetFloat(0);
+                case "timestamp":
+                case "date":
+                case "time":
+                    return GetDateTime(i);
+                default:
+                    return GetString(i);
+            }
         }
 
         /// <summary>
@@ -320,7 +364,7 @@ namespace MonetDb
         /// <returns></returns>
         public bool IsDBNull(int i)
         {
-            throw new Exception("The method or operation is not implemented.");
+            return enumerator.Current[i] == "NULL";
         }
 
         /// <summary>
@@ -330,7 +374,7 @@ namespace MonetDb
         /// <returns></returns>
         public object this[string name]
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return GetValue(GetOrdinal(name)); }
         }
 
         /// <summary>
@@ -340,7 +384,7 @@ namespace MonetDb
         /// <returns></returns>
         public object this[int i]
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return GetValue(i); }
         }
 
         #endregion

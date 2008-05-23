@@ -57,6 +57,17 @@ namespace MonetDb
 
     internal class MonetDbParameter : IDbDataParameter
     {
+        internal string GetProperParameter()
+        {
+            if (Value == DBNull.Value)
+                return "NULL";
+            //  If it is a string then let's sanitize the quotes and enclose the string in quotes
+            if (Value is string)
+                return @"'" + Value.ToString().Replace(@"'", @"''").Replace(@"""", @"""""") + @"'";
+
+            return Value.ToString();
+        }
+
         #region IDbDataParameter Members
 
         public byte Precision
@@ -164,15 +175,16 @@ namespace MonetDb
             }
         }
 
+        private object _value;
         public object Value
         {
             get
             {
-                throw new Exception("The method or operation is not implemented.");
+                return _value;
             }
             set
             {
-                throw new Exception("The method or operation is not implemented.");
+                _value = value;
             }
         }
 

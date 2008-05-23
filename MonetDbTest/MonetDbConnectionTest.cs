@@ -34,7 +34,7 @@ namespace MonetDbTest
         /// the "Getting Started" instructions on the MonetDB website will set up the environment 
         /// correctly for these tests to run.
         /// </summary>
-        public static string TestConnectionString = "host=127.0.0.1;port=50000;username=voc;password=voc;database=demo;ssl=false;";
+        public static string TestConnectionString = "host=127.0.0.1;port=50000;username=monetdb;password=monetdb;database=demo;ssl=false;";
 
         [Test]
         public void TestConnect()

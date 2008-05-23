@@ -101,7 +101,7 @@ namespace MonetDb
         /// </summary>
         public void Close()
         {
-            if(_socket != null)
+            if (_socket != null)
                 MonetDbConnectionFactory.CloseConnection(_socket, Database);
 
             _connectionState = ConnectionState.Closed;
@@ -142,7 +142,7 @@ namespace MonetDb
         /// <returns></returns>
         public IDbCommand CreateCommand()
         {
-            throw new Exception("The method or operation is not implemented.");
+            return new MonetDbCommand("", this);
         }
 
         /// <summary>
@@ -192,20 +192,43 @@ namespace MonetDb
             Close();
         }
 
-        /// <summary>
-        /// Returns the number of rows affected in an SQL UPDATE/DELETE/INSERT query
-        /// </summary>
-        /// <returns></returns>
-        internal int GetRowsAffected()
+        ///// <summary>
+        ///// Returns the number of rows affected in an SQL UPDATE/DELETE/INSERT query
+        ///// </summary>
+        ///// <returns></returns>
+        //internal int GetRowsAffected()
+        //{
+        //    throw new NotImplementedException("this is not implemented yet");
+        //    //return MapiLib.MapiRowsAffected(_socket);
+        //}
+
+        internal DataTable GetObjectSchema(List<MonetDBColumnInfo> columns)
         {
-            throw new NotImplementedException("this is not implemented yet");
-            //return MapiLib.MapiRowsAffected(_socket);
+            // TODO: Finish the schema extraction
+            DataTable dt = new DataTable();
+            dt.Columns.Add("ColumnName", typeof(String));
+            dt.Columns.Add("ColumnOrdinal", typeof(int));
+            dt.Columns.Add("ColumnSize", typeof(int));
+            dt.Columns.Add("NumericPrecision");
+            dt.Columns.Add("NumericScale");
+            dt.Columns.Add("IsUnique", typeof(bool));
+            dt.Columns.Add("IsKey", typeof(bool));
+            dt.Columns.Add("BaseServerName", typeof(string));
+            dt.Columns.Add("BaseCatalogName", typeof(string));
+            dt.Columns.Add("BaseColumnName", typeof(string));
+            dt.Columns.Add("BaseSchemaName", typeof(string));
+            dt.Columns.Add("BaseTableName", typeof(string));
+            dt.Columns.Add("BaseColumnName", typeof(string));
+            dt.Columns.Add("DataType", typeof(Type));
+            dt.Columns.Add("DataTypeName", typeof(string));
+
+            return dt;
         }
 
         private void ParseConnectionString(string connectionString)
         {
             _host = _username = _password = _dbname = null;
-            _port = 0;
+            _port = 50000;
             _useSsl = false;
 
             int tempPoolMin, tempPoolMax;
@@ -281,6 +304,11 @@ namespace MonetDb
             }
         }
 
+        internal IEnumerable<MonetDBQueryResponseInfo> ExecuteSQL(string sql)
+        {
+            return _socket.ExecuteSQL(sql);
+        }
+
         private string _host;
         private int _port;
         private string _username;
@@ -291,6 +319,7 @@ namespace MonetDb
         private int _maxPoolConnections = 20;
 
         private MapiSocket _socket;
+
 
         private ConnectionState _connectionState;
     }
