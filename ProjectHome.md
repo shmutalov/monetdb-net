@@ -1,0 +1,1 @@
+A client library for the MonetDB database system written in .NET for use in .NET projects.
