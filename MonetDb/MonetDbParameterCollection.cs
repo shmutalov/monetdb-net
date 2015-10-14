@@ -1,15 +1,12 @@
-using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Data;
 
-namespace MonetDb
+namespace System.Data.MonetDb
 {
     internal class MonetDbParameterCollection : List<IDbDataParameter>, IDataParameterCollection
     {
         public bool Contains(string parameterName)
         {
-            IDbDataParameter parameter = this.Find(delegate(IDbDataParameter param)
+            var parameter = Find(delegate(IDbDataParameter param)
             {
                 return param.ParameterName.Equals(parameterName);
             });
@@ -19,7 +16,7 @@ namespace MonetDb
 
         public int IndexOf(string parameterName)
         {
-            int index = this.FindIndex(delegate(IDbDataParameter param)
+            var index = FindIndex(delegate(IDbDataParameter param)
             {
                 return param.ParameterName.Equals(parameterName);
             });
@@ -29,16 +26,16 @@ namespace MonetDb
 
         public void RemoveAt(string parameterName)
         {
-            int index = IndexOf(parameterName);
+            var index = IndexOf(parameterName);
             if (index > -1)
-                this.RemoveAt(index);
+                RemoveAt(index);
         }
 
         public object this[string parameterName]
         {
             get
             {
-                int index = IndexOf(parameterName);
+                var index = IndexOf(parameterName);
                 if (index > -1)
                     return this[index];
                 else
@@ -46,11 +43,11 @@ namespace MonetDb
             }
             set
             {
-                int index = IndexOf(parameterName);
+                var index = IndexOf(parameterName);
                 if (index > -1)
                     this[index] = (IDbDataParameter)value;
                 else
-                    this.Add((IDbDataParameter)value);
+                    Add((IDbDataParameter)value);
             }
         }
     }
@@ -175,18 +172,7 @@ namespace MonetDb
             }
         }
 
-        private object _value;
-        public object Value
-        {
-            get
-            {
-                return _value;
-            }
-            set
-            {
-                _value = value;
-            }
-        }
+        public object Value { get; set; }
 
         #endregion
     }

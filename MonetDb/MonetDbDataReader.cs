@@ -1,28 +1,26 @@
-using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Data;
+using System.Data.MonetDb.Helpers.Mapi;
 
-namespace MonetDb
+namespace System.Data.MonetDb
 {
     /// <summary>
     /// Provides a means of reading one or more forward-only streams of result sets obtained by executing a command on a MonetDB server
     /// </summary>
     public class MonetDbDataReader : IDataReader
     {
-        bool isOpen = true;
-        MonetDBQueryResponseInfo _ri;
-        IEnumerable<MonetDBQueryResponseInfo> eri;
-        IEnumerator<MonetDBQueryResponseInfo> enum_ri;
-        IEnumerator<List<string>> enumerator;
-        MonetDbConnection _con;
+        private bool _isOpen = true;
+        private MonetDbQueryResponseInfo _responseInfo;
+        private IEnumerable<MonetDbQueryResponseInfo> _responseInfoEnumerable;
+        private readonly IEnumerator<MonetDbQueryResponseInfo> _responeInfoEnumerator;
+        private IEnumerator<List<string>> _enumerator;
+        private readonly MonetDbConnection _connection;
 
-        internal MonetDbDataReader(IEnumerable<MonetDBQueryResponseInfo> ri, MonetDbConnection con)
+        internal MonetDbDataReader(IEnumerable<MonetDbQueryResponseInfo> ri, MonetDbConnection connection)
         {
-            _con = con;
-            this.eri = ri;
-            this.enum_ri = ri.GetEnumerator();
-            this.NextResult();
+            _connection = connection;
+            _responseInfoEnumerable = ri;
+            _responeInfoEnumerator = ri.GetEnumerator();
+            NextResult();
         }
 
         #region IDataReader Members
@@ -49,7 +47,11 @@ namespace MonetDb
         /// <returns></returns>
         public DataTable GetSchemaTable()
         {
-            return _con.GetObjectSchema(_ri.columns);
+            var schema = new DataTable("SchemaTable");
+
+            return schema;
+
+            //return _connection.GetObjectSchema(_responseInfo.Columns);
 
         }
 
@@ -58,7 +60,7 @@ namespace MonetDb
         /// </summary>
         public bool IsClosed
         {
-            get { return isOpen == false; }
+            get { return _isOpen == false; }
         }
 
         /// <summary>
@@ -67,9 +69,9 @@ namespace MonetDb
         /// <returns></returns>
         public bool NextResult()
         {
-            bool flag = enum_ri.MoveNext();
-            _ri = enum_ri.Current;
-            enumerator = _ri.data.GetEnumerator();
+            var flag = _responeInfoEnumerator.MoveNext();
+            _responseInfo = _responeInfoEnumerator.Current;
+            _enumerator = _responseInfo.Data.GetEnumerator();
             return flag;
         }
 
@@ -79,7 +81,7 @@ namespace MonetDb
         /// <returns></returns>
         public bool Read()
         {
-            return enumerator.MoveNext();
+            return _enumerator.MoveNext();
         }
 
         /// <summary>
@@ -87,7 +89,7 @@ namespace MonetDb
         /// </summary>
         public int RecordsAffected
         {
-            get { return _ri.recordsAffected; }
+            get { return _responseInfo.RecordsAffected; }
         }
 
         #endregion
@@ -99,12 +101,12 @@ namespace MonetDb
         /// </summary>
         public void Dispose()
         {
-            while (enum_ri.MoveNext())
+            while (_responeInfoEnumerator.MoveNext())
             {
-                while (enumerator.MoveNext()) ;
-                enumerator.Dispose();
+                while (_enumerator.MoveNext()) ;
+                _enumerator.Dispose();
             }
-            enum_ri.Dispose();
+            _responeInfoEnumerator.Dispose();
         }
 
         #endregion
@@ -116,7 +118,7 @@ namespace MonetDb
         /// </summary>
         public int FieldCount
         {
-            get { return _ri.columnCount; }
+            get { return _responseInfo.ColumnCount; }
         }
 
         /// <summary>
@@ -160,7 +162,7 @@ namespace MonetDb
         /// <returns></returns>
         public char GetChar(int i)
         {
-            return enumerator.Current[i][0];
+            return _enumerator.Current[i][0];
         }
 
         /// <summary>
@@ -194,7 +196,7 @@ namespace MonetDb
         /// <returns></returns>
         public string GetDataTypeName(int i)
         {
-            return _ri.columns[i].dataType;
+            return _responseInfo.Columns[i].DataType;
         }
 
         /// <summary>
@@ -214,7 +216,7 @@ namespace MonetDb
         /// <returns></returns>
         public decimal GetDecimal(int i)
         {
-            return decimal.Parse(enumerator.Current[i]);
+            return decimal.Parse(_enumerator.Current[i]);
         }
 
         /// <summary>
@@ -224,7 +226,7 @@ namespace MonetDb
         /// <returns></returns>
         public double GetDouble(int i)
         {
-            return double.Parse(enumerator.Current[i]);
+            return double.Parse(_enumerator.Current[i]);
         }
 
         /// <summary>
@@ -244,7 +246,7 @@ namespace MonetDb
         /// <returns></returns>
         public float GetFloat(int i)
         {
-            return float.Parse(enumerator.Current[i]);
+            return float.Parse(_enumerator.Current[i]);
         }
 
         /// <summary>
@@ -254,7 +256,7 @@ namespace MonetDb
         /// <returns></returns>
         public Guid GetGuid(int i)
         {
-            return new Guid(enumerator.Current[i]);
+            return new Guid(_enumerator.Current[i]);
         }
 
         /// <summary>
@@ -264,7 +266,7 @@ namespace MonetDb
         /// <returns></returns>
         public short GetInt16(int i)
         {
-            return short.Parse(enumerator.Current[i]);
+            return short.Parse(_enumerator.Current[i]);
         }
 
         /// <summary>
@@ -274,7 +276,7 @@ namespace MonetDb
         /// <returns></returns>
         public int GetInt32(int i)
         {
-            return int.Parse(enumerator.Current[i]);
+            return int.Parse(_enumerator.Current[i]);
         }
 
         /// <summary>
@@ -284,7 +286,7 @@ namespace MonetDb
         /// <returns></returns>
         public long GetInt64(int i)
         {
-            return long.Parse(enumerator.Current[i]);
+            return long.Parse(_enumerator.Current[i]);
         }
 
         /// <summary>
@@ -294,7 +296,7 @@ namespace MonetDb
         /// <returns></returns>
         public string GetName(int i)
         {
-            return _ri.columns[i].name;
+            return _responseInfo.Columns[i].Name;
         }
 
         /// <summary>
@@ -304,7 +306,7 @@ namespace MonetDb
         /// <returns></returns>
         public int GetOrdinal(string name)
         {
-            return _ri.columns.FindIndex(delegate(MonetDBColumnInfo ci) { return (ci.name == name); });
+            return _responseInfo.Columns.FindIndex(ci => (ci.Name == name));
         }
 
         /// <summary>
@@ -314,7 +316,7 @@ namespace MonetDb
         /// <returns></returns>
         public string GetString(int i)
         {
-            return enumerator.Current[i];
+            return _enumerator.Current[i];
         }
 
         /// <summary>
@@ -326,7 +328,7 @@ namespace MonetDb
         {
             if (IsDBNull(i))
                 return DBNull.Value;
-            switch (_ri.columns[i].dataType)
+            switch (_responseInfo.Columns[i].DataType)
             {
                 case "smallint":
                     return GetInt16(i);
@@ -364,7 +366,7 @@ namespace MonetDb
         /// <returns></returns>
         public bool IsDBNull(int i)
         {
-            return enumerator.Current[i] == "NULL";
+            return _enumerator.Current[i] == "NULL";
         }
 
         /// <summary>

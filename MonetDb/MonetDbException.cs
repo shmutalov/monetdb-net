@@ -15,12 +15,9 @@
  * Portions created by Tim Gebhardt are Copyright (C) 2007. All Rights Reserved.
  */
 
-using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Data.Common;
 
-namespace MonetDb
+namespace System.Data.MonetDb
 {
     /// <summary>
     /// Exception type of all MonetDB related errors.
@@ -32,7 +29,27 @@ namespace MonetDb
         /// Initializes a new exception which occurred with MonetDB.
         /// </summary>
         /// <param name="message">The message that the user should review and may help to determine what went wrong.</param>
-        public MonetDbException(string message): base(message)
+        public MonetDbException(string message)
+            : base(message)
+        { }
+
+        /// <summary>
+        /// Initializes a new exception which occurred with MonetDB.
+        /// </summary>
+        /// <param name="format">String format template for message</param>
+        /// <param name="args">String format template arguments</param>
+        public MonetDbException(string format, params object[] args) 
+            : this(string.Format(format, args))
+        { }
+
+        /// <summary>
+        /// Initializes a new exception which occurred with MonetDB.
+        /// </summary>
+        /// <param name="innerException">If this exception is wrapping another exception and throwing it up-level, this is the original exception.</param>
+        /// <param name="format">String format template for message</param>
+        /// <param name="args">String format template arguments</param>
+        public MonetDbException(Exception innerException, string format, params object[] args)
+            : this(innerException, string.Format(format, args))
         { }
 
         /// <summary>

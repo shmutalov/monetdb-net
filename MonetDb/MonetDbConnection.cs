@@ -15,18 +15,31 @@
  * Portions created by Tim Gebhardt are Copyright (C) 2007. All Rights Reserved.
  */
 
-using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Data;
+using System.Data.MonetDb.Helpers;
+using System.Data.MonetDb.Helpers.Mapi;
 
-namespace MonetDb
+namespace System.Data.MonetDb
 {
     /// <summary>
     /// Represents an open connection with an MonetDB server.
     /// </summary>
     public class MonetDbConnection : IDbConnection
     {
+        private string _host;
+        private int _port;
+        private string _username;
+        private string _password;
+        private int _minPoolConnections = 3;
+        private int _maxPoolConnections = 20;
+
+        private MapiSocket _socket;
+
+        private MonetDbMetaData _metaData;
+        private readonly object _syncLock = new object();
+
+        #region Constructors
+
         /// <summary>
         /// Initializes a new connection with the MonetDB server.
         /// </summary>
@@ -46,19 +59,28 @@ namespace MonetDb
                 throw new ArgumentNullException("connectionString", "connectionString cannot be null");
 
             ConnectionString = connectionString;
-            _connectionState = ConnectionState.Closed;
+            State = ConnectionState.Closed;
         }
+
+        #endregion
+
         /// <summary>
         /// Begins a database transaction with the specified <c>IsolationLevel</c> value.
         /// </summary>
-        /// <param name="il">One of the <c>IsolationLevel</c> values.</param>
+        /// <param name="isolationLevel">One of the <c>IsolationLevel</c> values.</param>
         /// <returns></returns>
-        public IDbTransaction BeginTransaction(IsolationLevel il)
+        public IDbTransaction BeginTransaction(IsolationLevel isolationLevel)
         {
-            if (_connectionState != ConnectionState.Open)
+            if (State != ConnectionState.Open)
                 throw new InvalidOperationException("Connection is not open");
 
-            throw new NotImplementedException("This is not implemented yet");
+            if (isolationLevel != IsolationLevel.Serializable)
+                throw new ArgumentException(string.Format(
+                        "Isolation level {0} is not supported", 
+                        isolationLevel), 
+                    "isolationLevel");
+
+            return new MonetDbTransaction(this, isolationLevel);
         }
 
         /// <summary>
@@ -78,15 +100,15 @@ namespace MonetDb
         /// </param>
         public void ChangeDatabase(string databaseName)
         {
-            bool reopen = false;
-            if (_connectionState == ConnectionState.Open)
+            var reopen = false;
+            if (State == ConnectionState.Open)
             {
                 Close();
                 reopen = true;
             }
 
-            string[] connectionStringChunks = ConnectionString.Split(';');
-            for (int i = 0; i < connectionStringChunks.Length; i++)
+            var connectionStringChunks = ConnectionString.Split(';');
+            for (var i = 0; i < connectionStringChunks.Length; i++)
                 if (connectionStringChunks[i].StartsWith("database=", StringComparison.InvariantCultureIgnoreCase))
                     connectionStringChunks[i] = "database=" + databaseName;
 
@@ -104,7 +126,7 @@ namespace MonetDb
             if (_socket != null)
                 MonetDbConnectionFactory.CloseConnection(_socket, Database);
 
-            _connectionState = ConnectionState.Closed;
+            State = ConnectionState.Closed;
         }
 
         private string _connectionString;
@@ -121,7 +143,7 @@ namespace MonetDb
             set
             {
                 if (string.IsNullOrEmpty(value))
-                    throw new ArgumentNullException("ConnectionString", "ConnectionString cannot be null");
+                    throw new ArgumentNullException( "value", "ConnectionString cannot be null");
 
                 _connectionString = value;
                 ParseConnectionString(value);
@@ -129,7 +151,8 @@ namespace MonetDb
         }
 
         /// <summary>
-        /// Gets the time to wait while trying to establish a connection before terminating the attempt and generating an error.
+        /// Gets the time to wait while trying to establish a 
+        /// connection before terminating the attempt and generating an error.
         /// </summary>
         public int ConnectionTimeout
         {
@@ -146,43 +169,39 @@ namespace MonetDb
         }
 
         /// <summary>
-        /// Gets the name of the current database or the database to be used after a connection is opened.
+        /// Gets the name of the current database or the 
+        /// database to be used after a connection is opened.
         /// </summary>
-        public string Database
-        {
-            get { return _dbname; }
-        }
+        public string Database { get; private set; }
 
         /// <summary>
-        /// Opens a database connection with the settings specified by the <c>ConnectionString</c> property 
+        /// Opens a database connection with the settings 
+        /// specified by the <c>ConnectionString</c> property 
         /// of the provider-specific Connection object.
         /// </summary>
         public void Open()
         {
-            if (_connectionState == ConnectionState.Open)
+            if (State == ConnectionState.Open)
                 throw new InvalidOperationException("Connection is already open");
 
-            _connectionState = ConnectionState.Connecting;
+            State = ConnectionState.Connecting;
 
             if (string.IsNullOrEmpty(ConnectionString))
             {
-                _connectionState = ConnectionState.Closed;
-                throw new InvalidOperationException("ConnectionString has not been set.  Cannot connect to database.");
+                State = ConnectionState.Closed;
+                throw new InvalidOperationException("ConnectionString has not been set. Cannot connect to database.");
             }
 
             _socket = MonetDbConnectionFactory.GetConnection(_host, _port, _username, _password,
-                                                             _dbname, _useSsl, _minPoolConnections, _maxPoolConnections);
+                                                             Database, _minPoolConnections, _maxPoolConnections);
 
-            _connectionState = ConnectionState.Open;
+            State = ConnectionState.Open;
         }
 
         /// <summary>
         /// Gets the current state of the connection.
         /// </summary>
-        public ConnectionState State
-        {
-            get { return _connectionState; }
-        }
+        public ConnectionState State { get; private set; }
 
         /// <summary>
         /// Releases the connection back to the connection pool.
@@ -202,125 +221,113 @@ namespace MonetDb
         //    //return MapiLib.MapiRowsAffected(_socket);
         //}
 
-        internal DataTable GetObjectSchema(List<MonetDBColumnInfo> columns)
+        internal MonetDbMetaData GetMetaData()
         {
-            // TODO: Finish the schema extraction
-            DataTable dt = new DataTable();
-            dt.Columns.Add("ColumnName", typeof(String));
-            dt.Columns.Add("ColumnOrdinal", typeof(int));
-            dt.Columns.Add("ColumnSize", typeof(int));
-            dt.Columns.Add("NumericPrecision");
-            dt.Columns.Add("NumericScale");
-            dt.Columns.Add("IsUnique", typeof(bool));
-            dt.Columns.Add("IsKey", typeof(bool));
-            dt.Columns.Add("BaseServerName", typeof(string));
-            dt.Columns.Add("BaseCatalogName", typeof(string));
-            dt.Columns.Add("BaseColumnName", typeof(string));
-            dt.Columns.Add("BaseSchemaName", typeof(string));
-            dt.Columns.Add("BaseTableName", typeof(string));
-            dt.Columns.Add("BaseColumnName", typeof(string));
-            dt.Columns.Add("DataType", typeof(Type));
-            dt.Columns.Add("DataTypeName", typeof(string));
+            // create on request
+            return _metaData ?? (_metaData = new MonetDbMetaData(this));
 
-            return dt;
+            // TODO: Finish the schema extraction
+            //var dt = new DataTable();
+            //dt.Columns.Add("ColumnName", typeof(string));
+            //dt.Columns.Add("ColumnOrdinal", typeof(int));
+            //dt.Columns.Add("ColumnSize", typeof(int));
+            //dt.Columns.Add("NumericPrecision");
+            //dt.Columns.Add("NumericScale");
+            //dt.Columns.Add("IsUnique", typeof(bool));
+            //dt.Columns.Add("IsKey", typeof(bool));
+            //dt.Columns.Add("BaseServerName", typeof(string));
+            //dt.Columns.Add("BaseCatalogName", typeof(string));
+            //dt.Columns.Add("BaseColumnName", typeof(string));
+            //dt.Columns.Add("BaseSchemaName", typeof(string));
+            //dt.Columns.Add("BaseTableName", typeof(string));
+            //dt.Columns.Add("BaseColumnName", typeof(string));
+            //dt.Columns.Add("DataType", typeof(Type));
+            //dt.Columns.Add("DataTypeName", typeof(string));
+
+            //return dt;
         }
 
         private void ParseConnectionString(string connectionString)
         {
-            _host = _username = _password = _dbname = null;
+            _host = _username = _password = Database = null;
             _port = 50000;
-            _useSsl = false;
 
-            int tempPoolMin, tempPoolMax;
-
-            foreach (string setting in connectionString.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            foreach (var setting in connectionString.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
             {
-                string[] key_value = setting.Split(new char[] { '=' }, StringSplitOptions.RemoveEmptyEntries);
-                if (key_value.Length != 2)
+                var keyValue = setting.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries);
+                if (keyValue.Length != 2)
                 {
                     throw new ArgumentException(
-                        string.Format("ConnectionString is not well-formed: {0}", setting), "ConnectionString");
+                        string.Format("ConnectionString is not well-formed: {0}", setting), 
+                        "connectionString");
                 }
 
-                string key = key_value[0].ToLowerInvariant().Trim();
-                string value = key_value[1];
+                var key = keyValue[0].ToLowerInvariant().Trim();
+                var value = keyValue[1];
 
                 switch (key)
                 {
-                    case "host": _host = value;
+                    case "host":
+                        _host = value;
                         break;
-                    case "port": if (!int.TryParse(value, out _port))
+                    case "port":
+                        if (!int.TryParse(value, out _port))
                         {
                             throw new ArgumentException(
                                 string.Format("Port is not a valid integer: {0}", value),
-                                "ConnectionString");
+                                "connectionString");
                         }
                         break;
-                    case "username": _username = value;
+                    case "username":
+                        _username = value;
                         break;
-                    case "password": _password = value;
+                    case "password":
+                        _password = value;
                         break;
-                    case "database": _dbname = value;
-                        break;
-                    case "ssl": if (!bool.TryParse(value, out _useSsl))
-                        {
-                            throw new ArgumentException(
-                                string.Format("ssl is not a valid boolean: {0}", value),
-                                "ConnectionString");
-                        }
+                    case "database":
+                        Database = value;
                         break;
                     case "poolminimum":
+                        int tempPoolMin;
                         if (!int.TryParse(value, out tempPoolMin))
                         {
                             throw new ArgumentException(
                                 string.Format("poolminimum is not a valid integer: {0}", value),
-                                "ConnectionString");
+                                "connectionString");
                         }
-                        else if (tempPoolMin > _minPoolConnections)
+
+                        if (tempPoolMin > _minPoolConnections)
                         {
                             _minPoolConnections = tempPoolMin;
                         }
                         break;
                     case "poolmaximum":
+                        int tempPoolMax;
                         if (!int.TryParse(value, out tempPoolMax))
                         {
                             throw new ArgumentException(
                                 string.Format("poolmaximum is not a valid integer: {0}", value),
-                                "ConnectionString");
+                                "connectionString");
                         }
-                        else if (tempPoolMax > _maxPoolConnections)
+
+                        if (tempPoolMax > _maxPoolConnections)
                         {
                             _maxPoolConnections = tempPoolMax;
                         }
                         break;
-                    default:
-                        break;
                 }
             }
 
-            if (string.IsNullOrEmpty(_dbname))
+            if (string.IsNullOrEmpty(Database))
             {
-                throw new ArgumentException("Database name not specified.  Please specify database.", "ConnectionString");
+                throw new ArgumentException("Database name not specified. Please specify database.",
+                    "connectionString");
             }
         }
 
-        internal IEnumerable<MonetDBQueryResponseInfo> ExecuteSQL(string sql)
+        internal IEnumerable<MonetDbQueryResponseInfo> ExecuteSql(string sql)
         {
-            return _socket.ExecuteSQL(sql);
+            return _socket.ExecuteSql(sql);
         }
-
-        private string _host;
-        private int _port;
-        private string _username;
-        private string _password;
-        private string _dbname;
-        private bool _useSsl;
-        private int _minPoolConnections = 3;
-        private int _maxPoolConnections = 20;
-
-        private MapiSocket _socket;
-
-
-        private ConnectionState _connectionState;
     }
 }

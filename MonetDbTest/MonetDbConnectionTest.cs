@@ -16,11 +16,8 @@
  */
 
 using System;
-using System.Collections.Generic;
-using System.Text;
-
-using MonetDb;
-
+using System.Data;
+using System.Data.MonetDb;
 using NUnit.Framework;
 
 namespace MonetDbTest
@@ -34,33 +31,33 @@ namespace MonetDbTest
         /// the "Getting Started" instructions on the MonetDB website will set up the environment 
         /// correctly for these tests to run.
         /// </summary>
-        public static string TestConnectionString = "host=127.0.0.1;port=50000;username=monetdb;password=monetdb;database=demo;ssl=false;";
+        private const string TestConnectionString = "host=127.0.0.1;port=50000;username=monetdb;password=monetdb;database=demo;";
 
         [Test]
         public void TestConnect()
         {
-            MonetDbConnection conn = new MonetDbConnection();
-            Assert.IsTrue(conn.State == System.Data.ConnectionState.Closed);
+            var connection = new MonetDbConnection();
+            Assert.IsTrue(connection.State == ConnectionState.Closed);
 
             try
             {
-                conn.Open();
+                connection.Open();
             }
             catch (InvalidOperationException)
             { }
 
-            conn = new MonetDbConnection(TestConnectionString);
-            conn.Open();
-            Assert.IsTrue(conn.State == System.Data.ConnectionState.Open);
-            Assert.AreEqual(conn.Database, "demo");
-            conn.Close();
-            Assert.IsTrue(conn.State == System.Data.ConnectionState.Closed);
-            Assert.AreEqual(conn.Database, "demo");
+            connection = new MonetDbConnection(TestConnectionString);
+            connection.Open();
+            Assert.IsTrue(connection.State == ConnectionState.Open);
+            Assert.AreEqual(connection.Database, "demo");
+            connection.Close();
+            Assert.IsTrue(connection.State == ConnectionState.Closed);
+            Assert.AreEqual(connection.Database, "demo");
 
             try
             {
-                conn = new MonetDbConnection(TestConnectionString.Replace("ssl=false", "ssl=true"));
-                conn.Open();
+                connection = new MonetDbConnection(TestConnectionString.Replace("ssl=false", "ssl=true"));
+                connection.Open();
             }
             catch (MonetDbException ex)
             {
@@ -69,55 +66,65 @@ namespace MonetDbTest
             }
             finally
             {
-                conn.Close();
+                connection.Close();
             }
         }
 
         [Test]
-        [ExpectedException(typeof(ArgumentException))]
         public void TestConnectMalformed1()
         {
-            new MonetDbConnection(TestConnectionString.Replace("port=50000", "port=asb"));
+            Assert.Throws<ArgumentException>(() =>
+            {
+                new MonetDbConnection(TestConnectionString.Replace("port=50000", "port=asb"));
+            });
         }
 
         [Test]
-        [ExpectedException(typeof(ArgumentException))]
         public void TestConnectMalformed2()
         {
-            new MonetDbConnection(TestConnectionString.Replace("port=50000", "port"));
+            Assert.Throws<ArgumentException>(() =>
+            {
+                new MonetDbConnection(TestConnectionString.Replace("port=50000", "port"));
+            });
         }
 
         [Test]
         public void TestConnectWrongDatabase()
         {
-            MonetDbConnection conn = new MonetDbConnection("host=localhost;port=50000;username=voc;password=voc;database=wrong");
+            new MonetDbConnection("host=localhost;port=50000;username=monetdb;password=monetdb;database=wrong");
         }
 
         [Test]
-        [ExpectedException(typeof(ArgumentException))]
         public void TestConnectNoDatabase()
         {
-            new MonetDbConnection("host=localhost;port=50000;username=voc;password=voc");
+            Assert.Throws<ArgumentException>(() =>
+            {
+                new MonetDbConnection("host=localhost;port=50000;username=monetdb;password=monetdb");
+            });
         }
 
         [Test]
-        [ExpectedException(typeof(InvalidOperationException))]
         public void TestConnectDoubleOpen()
         {
-            MonetDbConnection conn = new MonetDbConnection(TestConnectionString);
-            conn.Open();
-            conn.Open();
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                var conn = new MonetDbConnection(TestConnectionString);
+                conn.Open();
+                conn.Open();
+            });
         }
 
         [Test]
-        [ExpectedException(typeof(MonetDbException), UserMessage="This should throw a message that the database doesn't exist, but it's successfully changing the database name and reconnecting if it's doing so")]
         public void TestChangeDatabase()
         {
-            MonetDbConnection conn = new MonetDbConnection(TestConnectionString);
-            conn.Open();
-            Assert.IsTrue(conn.State == System.Data.ConnectionState.Open);
+            Assert.Throws<MonetDbException>(() =>
+            {
+                var conn = new MonetDbConnection(TestConnectionString);
+                conn.Open();
+                Assert.IsTrue(conn.State == ConnectionState.Open);
 
-            conn.ChangeDatabase("somethingelse");
+                conn.ChangeDatabase("demo2");
+            }, "This should throw a message that the database doesn't exist, but it's successfully changing the database name and reconnecting if it's doing so");
         }
 
         [Test]
@@ -128,17 +135,60 @@ namespace MonetDbTest
             //Only run this test, because the other tests will mess up the connection pool settings...
             //I know it's not very TDD and this is a code smell, but this is pretty standard fare for
             //database connectivity.
-            string modifiedConnString = TestConnectionString + "poolminimum=1;poolmaximum=5;";
-            MonetDbConnection[] conns = new MonetDbConnection[5];
-            for (int i = 0; i < conns.Length; i++)
+            var modifiedConnString = TestConnectionString + "poolminimum=1;poolmaximum=5;";
+            var connections = new MonetDbConnection[5];
+
+            for (var i = 0; i < connections.Length; i++)
             {
-                conns[i] = new MonetDbConnection(modifiedConnString);
-                conns[i].Open();
+                connections[i] = new MonetDbConnection(modifiedConnString);
+                connections[i].Open();
             }
 
-            for (int i = 0; i < conns.Length; i++)
+            foreach (var connection in connections)
             {
-                conns[i].Close();
+                connection.Close();
+            }
+        }
+
+        [Test]
+        public void TestCreateInsertSelectDropTable()
+        {
+            // random table name
+            var tableName = Guid.NewGuid().ToString();
+
+            // random integer value
+            var value = new Random().Next();
+
+            // SQL scripts
+            var createScript = string.Format("CREATE TABLE \"{0}\" (id int);", tableName);
+            var insertScript = string.Format("INSERT INTO \"{0}\" VALUES({1});", tableName, value);
+            var selectScript = string.Format("SELECT * FROM \"{0}\";", tableName);
+            var dropScript = string.Format("DROP TABLE \"{0}\";", tableName);
+
+            using (var connection = new MonetDbConnection(TestConnectionString))
+            {
+                connection.Open();
+
+                using (var command = connection.CreateCommand())
+                {
+                    // create table
+                    command.CommandText = createScript;
+                    command.ExecuteNonQuery();
+
+                    // insert into
+                    command.CommandText = insertScript;
+                    // rows affected 0 or 1
+                    Assert.Contains(command.ExecuteNonQuery(), new[] {0, 1});
+
+                    // select from
+                    command.CommandText = selectScript;
+                    var value2 = (int)command.ExecuteScalar();
+                    Assert.AreEqual(value, value2);
+
+                    // drop table
+                    command.CommandText = dropScript;
+                    command.ExecuteNonQuery();
+                }
             }
         }
     }

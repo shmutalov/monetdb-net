@@ -1,0 +1,526 @@
+using System.Collections.Generic;
+using System.Data.MonetDb.Extensions;
+using System.Data.MonetDb.Helpers.Mapi.Protocols;
+using System.IO;
+using System.Linq;
+using System.Net.Sockets;
+
+namespace System.Data.MonetDb.Helpers.Mapi
+{
+    /// <summary>
+    /// MapiSocket is a class for talking to a MonetDB server with the MAPI protocol.
+    /// MAPI is a line oriented protocol that talks UTF8 so we wrap a TCP socket with
+    /// StreamReader and StreamWriter streams to handle conversion.
+    /// 
+    /// MapiSocket logs into the MonetDB server, since the socket is worthless if it's
+    /// not logged in.
+    /// </summary>
+    internal sealed class MapiSocket : IDisposable
+    {
+        public readonly DateTime Created;
+        private TcpClient _socket;
+
+        public MapiSocket()
+        {
+            Created = DateTime.Now;
+
+            // register protocols
+            MapiProtocolFactory.Register<MapiProtocolVersion8>(8);
+            MapiProtocolFactory.Register<MapiProtocolVersion9>(9);
+        }
+
+        public void Close()
+        {
+            Dispose();
+        }
+
+        /// <summary>
+        /// Connects to a given host.  Returns a list of any warnings from the server.
+        /// </summary>
+        /// <param name="host"></param>
+        /// <param name="port"></param>
+        /// <param name="username"></param>
+        /// <param name="password"></param>
+        /// <param name="database"></param>
+        /// <returns></returns>
+        public IList<string> Connect(string host, int port, string username, string password, string database)
+        {
+            Database = database;
+            Host = host;
+            Port = port;
+            Username = username;
+
+            _socket = new TcpClient(Host, Port)
+            {
+                NoDelay = true,
+                ReceiveTimeout = 60 * 2 * 1000,
+                SendBufferSize = 60 * 2 * 1000
+            };
+
+            FromDatabase = new StreamReader(new MonetDbStream(_socket.GetStream()));
+            ToDatabase = new StreamWriter(new MonetDbStream(_socket.GetStream()));
+
+            var challenge = FromDatabase.ReadLine();
+
+            // wait till the prompt
+            FromDatabase.ReadLine();
+
+            var response = GetChallengeResponse(challenge, username, password, "sql", database, null);
+
+            ToDatabase.WriteLine(response);
+            ToDatabase.Flush();
+
+            var temp = FromDatabase.ReadLine();
+            var redirects = new List<string>();
+            var warnings = new List<string>();
+
+            while (temp != ".")
+            {
+                if (string.IsNullOrEmpty(temp))
+                    throw new MonetDbException("Connection to the server was lost");
+
+                switch ((MonetDbLineType)temp[0])
+                {
+                    case MonetDbLineType.Error:
+                        throw new MonetDbException(temp.Substring(1));
+                    case MonetDbLineType.Info:
+                        warnings.Add(temp.Substring(1));
+                        break;
+                    case MonetDbLineType.Redirect:
+                        warnings.Add(temp.Substring(1));
+                        break;
+                }
+
+                temp = FromDatabase.ReadLine();
+            }
+
+            if (redirects.Count <= 0)
+                return warnings;
+
+            _socket.Client.Close();
+            _socket.Close();
+
+            return FollowRedirects(redirects, username, password);
+        }
+
+
+        public string Database { get; set; }
+
+        private StreamReader FromDatabase { get; set; }
+
+        public string Host { get; private set; }
+
+        public int Port { get; private set; }
+
+        private StreamWriter ToDatabase { get; set; }
+
+        public string Username { get; private set; }
+
+        public void Dispose()
+        {
+            if (ToDatabase != null && _socket.Connected)
+                ToDatabase.Close();
+
+            if (FromDatabase != null && _socket.Connected)
+                FromDatabase.Close();
+
+            _socket.Close();
+        }
+
+        internal IEnumerable<MonetDbQueryResponseInfo> ExecuteSql(string sql)
+        {
+            ToDatabase.Write("s" + sql + ";\n");
+            ToDatabase.Flush();
+            var re = new MonetDbResultEnumerator(FromDatabase);
+            return re.GetResults();
+        }
+
+        /// <summary>
+        /// Returns a response string that we should send to the MonetDB server upon initial connection.
+        /// The challenge string is sent from the server in the format (without quotes) "challenge:servertype:protocolversion:"
+        /// 
+        /// For now we only support protocol version 8.
+        /// </summary>
+        /// <param name="challengeString">initial string sent from server to challenge against</param>
+        /// <param name="username"></param>
+        /// <param name="password"></param>
+        /// <param name="language"></param>
+        /// <param name="database"></param>
+        /// <param name="hash">the hash method to use, or null for all supported hashes</param>
+        /// <returns></returns>
+        private string GetChallengeResponse(
+            string challengeString, 
+            string username, string password, 
+            string language, string database, 
+            string hash)
+        {
+            var tokens = challengeString.Split(':');
+
+            if (tokens.Length <= 4)
+            {
+                throw new MonetDbException(string.Format(
+                    "Server challenge unusable! Challenge contains too few tokens: {0}",
+                    challengeString));
+            }
+
+            int version;
+
+            if (!int.TryParse(tokens[2], out version))
+                throw new MonetDbException("Unknown Mapi protocol {0}", tokens[2]);
+
+            // get Mapi protocol instance
+            var protocol = MapiProtocolFactory.GetProtocol(version);
+
+            if (protocol == null)
+                throw new MonetDbException("Unsupported protocol version {0}", version);
+
+            return protocol.BuildChallengeResponse(username, password, 
+                language, tokens, 
+                database, hash);
+        }
+
+        /// <summary>
+        /// We try the first url to redirect to.  It's not great, but realistically
+        /// we shouldn't get too many redirect urls to redirect to.  Returns all the
+        /// new warnings from the new connection.
+        /// </summary>
+        /// <param name="redirectUrls"></param>
+        /// <param name="user"></param>
+        /// <param name="password"></param>
+        private IList<string> FollowRedirects(List<string> redirectUrls, string user, string password)
+        {
+            var uri = new Uri(redirectUrls[0]);
+            var host = uri.Host;
+            var port = uri.Port;
+            var database = uri.PathAndQuery.Replace(uri.Query, "");
+            return Connect(host, port, user, password, database);
+        }
+
+        /// <summary>
+        /// This class process the stream into enumerated list of the MonetDBQueryResponseInfo objects which represent executed
+        /// statements in the batch. IEnumerable is used to facilitate lazy execution and eliminate the need in materialization
+        /// of the results returned by the server.
+        /// </summary>
+        private class MonetDbResultEnumerator
+        {
+            private string _temp;
+            private StreamReader _stream;
+
+            public MonetDbResultEnumerator(StreamReader stream)
+            {
+                _stream = stream;
+            }
+
+            private IEnumerable<List<string>> GetRows()
+            {
+                while (_temp[0] == '[')
+                {
+                    yield return SplitDataInColumns(_temp);
+                    _temp = _stream.ReadLine();
+
+                    if (_temp == null)
+                        throw new IOException("Cannot read closed stream");
+                }
+            }
+
+            private static IEnumerable<string> SplitCommaTabs(string s)
+            {
+                return s.Split(',').Select(v => v.Trim(' ', '\t'));
+            }
+
+            private static IEnumerable<string> ExtractValuesList(string s, string start, string end)
+            {
+                var startIndex = s.IndexOf(start);
+                var endIndex = s.IndexOf(end);
+                return SplitCommaTabs(s.Substring(startIndex + 1, endIndex - startIndex - 1));
+            }
+
+            private static KeyValuePair<string, List<string>> SplitColumnInfoLine(string s)
+            {
+                return new KeyValuePair<string, List<string>>(s.Substring(s.IndexOf('#') + 1).Trim(), new List<string>(ExtractValuesList(s, "%", "#")));
+            }
+
+            private static List<string> SplitDataInColumns(string s)
+            {
+                return new List<string>(ExtractValuesList(s, "[", "]"));
+            }
+
+            private static List<MonetDbColumnInfo> GetColumnInfo(List<string> headerInfo)
+            {
+                var list = new List<MonetDbColumnInfo>();
+
+                foreach (var infoLine in headerInfo.Select(SplitColumnInfoLine))
+                {
+                    if (list.Count == 0)
+                        list.AddRange(infoLine.Value.Select(ci => new MonetDbColumnInfo()));
+
+                    for (var i = 0; i < infoLine.Value.Count; i++)
+                    {
+                        switch (infoLine.Key)
+                        {
+                            case "table_name":
+                                list[i].TableName = infoLine.Value[i];
+                                break;
+                            case "name":
+                                list[i].Name = infoLine.Value[i];
+                                break;
+                            case "type":
+                                list[i].DataType = infoLine.Value[i];
+                                break;
+                            case "length":
+                                list[i].Length = int.Parse(infoLine.Value[i]);
+                                break;
+                        }
+                    }
+                }
+
+                return list;
+            }
+
+            public IEnumerable<MonetDbQueryResponseInfo> GetResults()
+            {
+                _temp = _stream.ReadLine();
+
+                if (_temp == null)
+                    throw new IOException("Unexpected end of stream");
+
+                do
+                {
+                    var ri = new MonetDbQueryResponseInfo();
+                    var headerInfo = new List<string>();
+
+                    while (_temp != "." && _temp[0] != '[')
+                    {
+                        switch (_temp[0])
+                        {
+                            case '&':
+                                ri = _temp.ToQueryResponseInfo();
+                                break;
+                            case '%':
+                                headerInfo.Add(_temp);
+                                break;
+                            case '!':
+                                throw new MonetDbException("Error! " + _temp.Substring(1));
+                        }
+
+                        _temp = _stream.ReadLine();
+
+                        if (_temp == null)
+                            throw new IOException("Unexpected end of stream");
+                    }
+
+                    ri.Columns = GetColumnInfo(headerInfo);
+                    ri.Data = GetRows();
+
+                    yield return ri;
+
+                } while (_temp != ".");
+
+                _stream = null;
+            }
+        }
+
+
+        /// <summary>
+        /// The MonetDB server has it's own protocol for streaming chunked input and output.
+        /// This is known as the "block" stream.  
+        /// 
+        /// A byte stream to and from the MonetDB server consists of one or more "blocks".
+        /// A block is a sequence of bytes, with the first two bytes indicating a 16-bit
+        /// integer length followed by the length number of bytes of data.  This can go on
+        /// for as many blocklength+block series are sent from the server, and the end of a 
+        /// sequence is indicated by a block with the most significant big set to 1 (blockHeader[0] &amp; 0x1) == 1).
+        /// 
+        /// When reading from the stream we end the sequence with a \n.\n (the first \n is added if not sent
+        /// by the server).  This makes this class trivial to wrap with a StreamReader and StreamWriter.
+        /// 
+        /// When writing to the server, we write the terminating block header
+        /// when the Flush() function is called.  If that's not called, we write out
+        /// blocks to the server as they're filled.
+        /// </summary>
+        private class MonetDbStream : Stream
+        {
+            private readonly Stream _monetStream;
+
+            private readonly byte[] _readBlock = new byte[short.MaxValue + 3];
+            private readonly byte[] _writeBlock = new byte[short.MaxValue];
+
+            private int _readPos, _writePos, _readLength, _writeLength;
+            private bool _lastReadBlock;
+
+            public MonetDbStream(Stream monetStream)
+            {
+                _monetStream = new BufferedStream(monetStream);
+                _lastReadBlock = false;
+            }
+
+            public override bool CanRead
+            {
+                get { return _monetStream.CanRead; }
+            }
+
+            public override bool CanSeek
+            {
+                get { return _monetStream.CanSeek; }
+            }
+
+            public override bool CanWrite
+            {
+                get { return _monetStream.CanWrite; }
+            }
+
+            public override void Flush()
+            {
+                WriteNextBlock(true);
+            }
+
+            public override long Length
+            {
+                get { return _monetStream.Length; }
+            }
+
+            public override long Position
+            {
+                get { return _monetStream.Position; }
+                set { _monetStream.Position = value; }
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                if (offset + count > buffer.Length)
+                    throw new ArgumentOutOfRangeException("offset", 
+                        "offset + count cannot be greater than the size of the buffer");
+
+                var available = _readLength - _readPos;
+                var retval = 0;
+                if (available == 0)
+                    available = ReadNextBlock();
+                while (available > 0 && retval < count)
+                {
+                    var length = count - retval > available 
+                        ? available 
+                        : count - retval;
+
+                    Array.Copy(_readBlock, _readPos, buffer, offset, length);
+
+                    retval += length;
+                    offset += length;
+                    _readPos += length;
+                    available = _readLength - _readPos;
+
+                    if (!_lastReadBlock && available == 0)
+                        available = ReadNextBlock();
+                }
+
+                return retval;
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new InvalidOperationException("Seeking not allowed on a network based stream");
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new InvalidOperationException("SetLength is not valid on a network based stream");
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                if (offset + count > buffer.Length)
+                    throw new ArgumentOutOfRangeException("offset", 
+                        "offset + count cannot be greater than the buffer length");
+
+                while (count > 0)
+                {
+                    if (count < _writeBlock.Length - _writePos)
+                    {
+                        //in this case we won't fill up the block buffer so we can just copy the bytes
+                        //to the buffer.
+                        Array.Copy(buffer, offset, _writeBlock, _writePos, count);
+                        _writeLength += count;
+                        count = 0;
+                    }
+                    else
+                    {
+                        //In this case we will fill up the block buffer, so we need to copy
+                        //what we can to the block buffer, write it out, and write what's left
+                        var tempCount = _writeBlock.Length - _writePos;
+                        Array.Copy(buffer, offset, _writeBlock, _writePos, tempCount);
+                        offset += tempCount;
+                        count -= tempCount;
+                        _writeLength += tempCount;
+                        WriteNextBlock(false);
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Reads the next available block on the provided stream.  Returns the bytes available in the block buffer.
+            /// </summary>
+            private int ReadNextBlock()
+            {
+                var blockHeader = new byte[2];
+
+                if (_monetStream.Read(blockHeader, 0, blockHeader.Length) != 2)
+                    throw new MonetDbException(
+                        new InvalidDataException("Invalid block header length"), 
+                        "Error reading data from MonetDB server");
+
+                _readLength = ((blockHeader[0] & 0xFF) >> 1 | 
+                                (blockHeader[1] & 0xFF) << 7);
+
+                _lastReadBlock = (blockHeader[0] & 0x1) == 1;
+
+                var read = 0;
+
+                while (read < _readLength)
+                    read += _monetStream.Read(_readBlock, read, _readLength - read);
+
+                _readPos = 0;
+
+                if (!_lastReadBlock)
+                    return _readLength - _readPos;
+
+                if (_readLength > 0 && _readBlock[_readLength - 1] != '\n')
+                    _readBlock[_readLength++] = (byte)'\n';
+
+                _readBlock[_readLength++] = (byte)MonetDbLineType.Prompt;
+                _readBlock[_readLength++] = (byte)'\n';
+
+                return _readLength - _readPos;
+            }
+
+            /// <summary>
+            /// Writes the next block to the provided stream.
+            /// </summary>
+            /// <param name="last">If <c>true</c> then we should write out the block header to indicate that this is the end
+            /// of the sequence.  If <c>false</c> the the server should expect more data.</param>
+            private void WriteNextBlock(bool last)
+            {
+                var blockHeader = new byte[2];
+                var blockSize = (short)_writeLength;
+
+                //if this is the last block then we set the most significant bit to 1
+                //if this is not the last block then we set the most significant bit to 0
+                if (last)
+                {
+                    blockHeader[0] = (byte)(blockSize << 1 & 0xFF | 1);
+                    blockHeader[1] = (byte)(blockSize >> 7);
+                }
+                else
+                {
+                    blockHeader[0] = (byte)(blockSize << 1 & 0xFF);
+                    blockHeader[1] = (byte)(blockSize >> 7);
+                }
+
+                _monetStream.Write(blockHeader, 0, blockHeader.Length);
+                _monetStream.Write(_writeBlock, 0, _writeLength);
+                _monetStream.Flush();
+
+                _writePos = 0;
+                _writeLength = 0;
+            }
+        }
+    }
+}

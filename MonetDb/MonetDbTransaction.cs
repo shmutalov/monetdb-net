@@ -1,15 +1,15 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Data;
-
-namespace MonetDb
+namespace System.Data.MonetDb
 {
     /// <summary>
     /// Represents a local transaction.
     /// </summary>
     public class MonetDbTransaction : IDbTransaction
     {
+        private readonly MonetDbConnection _connection;
+        private readonly IsolationLevel _isolation;
+
+        private readonly object _syncLock = new object();
+
         #region IDbTransaction Members
 
         /// <summary>
@@ -19,7 +19,47 @@ namespace MonetDb
         /// <param name="isolationLevel"></param>
         internal MonetDbTransaction(MonetDbConnection connection, IsolationLevel isolationLevel)
         {
+            // MonetDb only support "Serializable" isolation level
+            if (isolationLevel != IsolationLevel.Serializable)
+                throw new ArgumentException(string.Format(
+                        "Isolation level {0} is not supported", 
+                        isolationLevel), 
+                    "isolationLevel");
 
+            if (connection == null)
+                throw new ArgumentNullException("connection");
+
+            _connection = connection;
+            _isolation = IsolationLevel;
+
+            Start();
+        }
+
+        /// <summary>
+        /// Checks connection
+        /// </summary>
+        private void CheckConnection()
+        {
+            if (_connection == null || 
+                _connection.State != ConnectionState.Open)
+                throw new MonetDbException("Connection unexpectedly disposed or closed");
+        }
+
+        /// <summary>
+        /// Start the database transaction
+        /// </summary>
+        private void Start()
+        {
+            lock (_syncLock)
+            {
+                CheckConnection();
+
+                using (var command = _connection.CreateCommand())
+                {
+                    command.CommandText = "START TRANSACTION;";
+                    command.ExecuteNonQuery();
+                }
+            }
         }
 
         /// <summary>
@@ -27,7 +67,16 @@ namespace MonetDb
         /// </summary>
         public void Commit()
         {
-            throw new Exception("The method or operation is not implemented.");
+            lock (_syncLock)
+            {
+                CheckConnection();
+
+                using (var command = _connection.CreateCommand())
+                {
+                    command.CommandText = "COMMIT;";
+                    command.ExecuteNonQuery();
+                }
+            }
         }
 
         /// <summary>
@@ -35,7 +84,7 @@ namespace MonetDb
         /// </summary>
         public IDbConnection Connection
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return _connection; }
         }
 
         /// <summary>
@@ -43,7 +92,7 @@ namespace MonetDb
         /// </summary>
         public IsolationLevel IsolationLevel
         {
-            get { throw new Exception("The method or operation is not implemented."); }
+            get { return _isolation; }
         }
 
         /// <summary>
@@ -51,7 +100,16 @@ namespace MonetDb
         /// </summary>
         public void Rollback()
         {
-            throw new Exception("The method or operation is not implemented.");
+            lock (_syncLock)
+            {
+                CheckConnection();
+
+                using (var command = _connection.CreateCommand())
+                {
+                    command.CommandText = "ROLLBACK;";
+                    command.ExecuteNonQuery();
+                }
+            }
         }
 
         #endregion
@@ -59,11 +117,12 @@ namespace MonetDb
         #region IDisposable Members
 
         /// <summary>
-        /// Rolls back the transaction (if uncommited) and releases the resources that were used for the transaction.
+        /// Rolls back the transaction (if uncommited) 
+        /// and releases the resources that were used for the transaction.
         /// </summary>
         public void Dispose()
         {
-            throw new Exception("The method or operation is not implemented.");
+            
         }
 
         #endregion

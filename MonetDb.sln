@@ -1,7 +1,9 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 9.00
-# Visual C# Express 2005
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonetDb", "MonetDb\MonetDb.csproj", "{EA1DAC72-FCD8-4766-85B0-129DCBF2FA22}"
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.23107.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "System.Data.MonetDb", "MonetDb\System.Data.MonetDb.csproj", "{EA1DAC72-FCD8-4766-85B0-129DCBF2FA22}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonetDbTest", "MonetDbTest\MonetDbTest.csproj", "{C723F41E-ADAD-4B3F-943C-D01E35BC78D0}"
 EndProject

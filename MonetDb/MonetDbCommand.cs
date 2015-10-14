@@ -1,9 +1,8 @@
-using System;
 using System.Collections.Generic;
+using System.Data.MonetDb.Helpers.Mapi;
 using System.Text;
-using System.Data;
 
-namespace MonetDb
+namespace System.Data.MonetDb
 {
     /// <summary>
     /// Represents an SQL command to send to a <c>MonetDbConnection</c>
@@ -61,15 +60,10 @@ namespace MonetDb
             throw new NotImplementedException("this is not implemented yet");
         }
 
-        private string _commandText;
         /// <summary>
         /// Gets or sets the text command to run against the MonetDB server.
         /// </summary>
-        public string CommandText
-        {
-            get { return _commandText; }
-            set { _commandText = value; }
-        }
+        public string CommandText { get; set; }
 
         /// <summary>
         /// Gets or sets the wait time before terminating the attempt to execute a command and generating an error.
@@ -121,8 +115,8 @@ namespace MonetDb
         /// <returns></returns>
         public int ExecuteNonQuery()
         {
-            int cnt = 0;
-            using (MonetDbDataReader dr = new MonetDbDataReader(ExecuteCommand(), Connection as MonetDbConnection))
+            var cnt = 0;
+            using (var dr = new MonetDbDataReader(ExecuteCommand(), Connection as MonetDbConnection))
             {
                 do
                 {
@@ -132,15 +126,16 @@ namespace MonetDb
             return cnt;
         }
 
-        private IEnumerable<MonetDBQueryResponseInfo> ExecuteCommand()
+        private IEnumerable<MonetDbQueryResponseInfo> ExecuteCommand()
         {
-            if (Connection.State != ConnectionState.Open)
+            if (Connection == null || Connection.State != ConnectionState.Open)
                 throw new MonetDbException("Connection is closed");
-            StringBuilder sb = new StringBuilder(CommandText);
+
+            var sb = new StringBuilder(CommandText);
             foreach (MonetDbParameter p in Parameters)
                 ApplyParameter(sb, new KeyValuePair<string, string>(p.ParameterName, p.GetProperParameter()));
 
-            return (Connection as MonetDbConnection).ExecuteSQL(sb.ToString());
+            return (Connection as MonetDbConnection).ExecuteSql(sb.ToString());
         }
 
         /// <summary>
@@ -162,30 +157,29 @@ namespace MonetDb
             return ExecuteReader(CommandBehavior.Default);
         }
 
-
-
         private StringBuilder ApplyParameter(StringBuilder sb, KeyValuePair<string, string> p)
         {
-            int quoteSingle = 0;
-            int quoteDouble = 0;
-            char[] param = p.Key.ToCharArray();
-            int i = 0;
+            var quoteSingle = 0;
+            var quoteDouble = 0;
+            var param = p.Key.ToCharArray();
+            var i = 0;
             while (i < sb.Length)
             {
-                char cur = sb[i];
+                var cur = sb[i];
                 if (cur == '\'')
                     quoteSingle++;
                 if (cur == '\"')
                     quoteDouble++;
                 if (quoteDouble + quoteSingle == 0)
                 {
-                    bool found = true;
-                    for (int j = 0; j < param.Length; j++)
+                    var found = true;
+                    for (var j = 0; j < param.Length; j++)
                         if (param[j] != sb[i + j])
                         {
                             found = false;
                             break;
                         }
+
                     if (found)
                     {
                         sb.Remove(i, param.Length);
@@ -195,6 +189,7 @@ namespace MonetDb
                 }
                 i++;
             }
+
             return sb;
         }
 
@@ -206,16 +201,13 @@ namespace MonetDb
         /// <returns></returns>
         public object ExecuteScalar()
         {
-            using (IDataReader dr = ExecuteReader())
+            using (var dr = ExecuteReader())
             {
-                if (dr.Read())
-                    return dr[0];
-                return null;
+                return dr.Read() ? dr[0] : null;
             }
-
         }
 
-        private MonetDbParameterCollection _parameters;
+        private readonly MonetDbParameterCollection _parameters;
         /// <summary>
         /// Gets the IDataParameterCollection.
         /// </summary>
