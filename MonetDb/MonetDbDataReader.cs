@@ -1,5 +1,10 @@
 using System.Collections.Generic;
+using System.Data.MonetDb.Constants;
+using System.Data.MonetDb.Extensions;
+using System.Data.MonetDb.Helpers;
 using System.Data.MonetDb.Helpers.Mapi;
+using System.Data.MonetDb.Models;
+using System.Linq;
 
 namespace System.Data.MonetDb
 {
@@ -15,12 +20,175 @@ namespace System.Data.MonetDb
         private IEnumerator<List<string>> _enumerator;
         private readonly MonetDbConnection _connection;
 
+        private MonetDbMetaData _metaData;
+        private DataTable _schemaTable;
+
         internal MonetDbDataReader(IEnumerable<MonetDbQueryResponseInfo> ri, MonetDbConnection connection)
         {
+            _metaData = null;
+            _schemaTable = null;
+
             _connection = connection;
             _responseInfoEnumerable = ri;
             _responeInfoEnumerator = ri.GetEnumerator();
             NextResult();
+        }
+
+        private DataTable GenerateSchemaTable()
+        {
+            if (_metaData == null)
+                _metaData = new MonetDbMetaData(_connection);
+
+            // schema table always must be named as "SchemaTable"
+            var table = new DataTable("SchemaTable");
+
+            // create table schema columns
+            table.Columns.Add(MonetDbSchemaTableColumns.ColumnName, typeof(string));
+            table.Columns.Add(MonetDbSchemaTableColumns.ColumnOrdinal, typeof(int));
+            table.Columns.Add(MonetDbSchemaTableColumns.ColumnSize, typeof(int));
+            table.Columns.Add(MonetDbSchemaTableColumns.NumericPrecision, typeof(int));
+            table.Columns.Add(MonetDbSchemaTableColumns.NumericScale, typeof(int));
+            table.Columns.Add(MonetDbSchemaTableColumns.DataType, typeof(Type));
+            table.Columns.Add(MonetDbSchemaTableColumns.ProviderType, typeof(int));
+            table.Columns.Add(MonetDbSchemaTableColumns.ProviderSpecificDataType, typeof(DbType));
+            table.Columns.Add(MonetDbSchemaTableColumns.IsLong, typeof(bool));
+            table.Columns.Add(MonetDbSchemaTableColumns.AllowDbNull, typeof(bool));
+            table.Columns.Add(MonetDbSchemaTableColumns.IsReadOnly, typeof(bool));
+            table.Columns.Add(MonetDbSchemaTableColumns.IsRowVersion, typeof(bool));
+            table.Columns.Add(MonetDbSchemaTableColumns.IsUnique, typeof(bool));
+            table.Columns.Add(MonetDbSchemaTableColumns.IsKey, typeof(bool));
+            table.Columns.Add(MonetDbSchemaTableColumns.IsAutoincrement, typeof(bool));
+            table.Columns.Add(MonetDbSchemaTableColumns.BaseSchemaName, typeof(string));
+            table.Columns.Add(MonetDbSchemaTableColumns.BaseCatalogName, typeof(string));
+            table.Columns.Add(MonetDbSchemaTableColumns.BaseTableName, typeof(string));
+            table.Columns.Add(MonetDbSchemaTableColumns.BaseColumnName, typeof(string));
+            table.Columns.Add(MonetDbSchemaTableColumns.DataTypeName, typeof(string));
+
+            // fill table
+            for (var fieldIndex = 0; fieldIndex < FieldCount; fieldIndex++)
+            {
+                // get column name
+                var columnName = GetName(fieldIndex);
+
+                // get column size
+                var columnSize = _responseInfo.Columns[fieldIndex].Length;
+
+                //// get column precision
+                var numericPrecision = 0;
+                //DieQueryError();
+
+                //// get column scale
+                var numericScale = 0;
+                //DieQueryError();
+
+                // get data type
+                var providerType = _responseInfo.Columns[fieldIndex].DataType;
+
+                var dbType = providerType.GetDbType();
+                var providerSpecificDataType = dbType;
+                var systemType = providerType.GetSystemType();
+
+                // is binary large object
+                var lobs = new[] { "blob" };
+                var isLong = lobs.Contains(providerType);
+
+                // is nullable
+                // TODO: retreive information from sys.columns table
+                var allowDbNull = true;
+
+                // is read only
+                // MonetDB does not support cursor updates, so
+                // nothing is writable.
+                var isReadOnly = true;
+
+                // is rowid
+                var isRowVersion = false;
+
+                // is unique
+                var isUnique = false;
+
+                // is key
+                var isKey = false;
+
+                // is nullable
+                var isAutoincrement = providerType.Equals("oid");
+
+                // get column base table name. Result contains both schema and table name
+                // so, we need split them
+                var baseFullTableName = _responseInfo.Columns[fieldIndex].TableName;
+
+                var baseTableName = baseFullTableName;
+                var baseSchemaName = string.Empty;
+
+                if (baseFullTableName.IndexOf("."
+                    , StringComparison.InvariantCultureIgnoreCase) != -1)
+                {
+                    var s = baseFullTableName.Split('.');
+
+                    // get column base schema name
+                    baseSchemaName = s[0];
+                    baseTableName = s[1];
+                }
+
+                // get column meta data
+                var columnsInfo = _metaData.GetColumns("", "", baseTableName, columnName);
+                MonetDbColumnInfoModel columnInfo;
+
+                if (columnsInfo.Count == 1)
+                {
+                    columnInfo = columnsInfo[0];
+                }
+                else
+                {
+                    columnInfo = new MonetDbColumnInfoModel
+                    {
+                        Catalog = _metaData.GetEnvironmentVariable("gdk_dbname"),
+                        CharOctetLength = 0,
+                        ColumnSize = columnSize,
+                        DataType = providerType,
+                        DefaultValue = null,
+                        Name = string.Empty,
+                        Nullable = allowDbNull, // Actually, we don't know about this
+                        Ordinal = fieldIndex, // In schema table we must always use results field index
+                        Radix = 10,
+                        Remarks = string.Empty,
+                        Scale = numericScale,
+                        Schema = baseSchemaName,
+                        Table = baseTableName
+                    };
+                }
+
+                // get additional info
+                isUnique = _metaData.IsColumnUniqueKey("", columnInfo.Schema,
+                    columnInfo.Table, columnInfo.Name);
+                isKey = _metaData.IsColumnPrimaryKey("", columnInfo.Schema,
+                        columnInfo.Table, columnInfo.Name);
+
+                table.Rows.Add(
+                        columnName,
+                        fieldIndex,
+                        columnSize,
+                        numericPrecision,
+                        numericScale,
+                        systemType,
+                        providerSpecificDataType.To<int>(),
+                        providerSpecificDataType,
+                        isLong,
+                        columnInfo.Nullable,
+                        isReadOnly,
+                        isRowVersion,
+                        isUnique,
+                        isKey,
+                        isAutoincrement,
+                        columnInfo.Schema,
+                        columnInfo.Catalog,
+                        columnInfo.Table,
+                        columnInfo.Name,
+                        providerType
+                    );
+            }
+
+            return table;
         }
 
         #region IDataReader Members
@@ -47,12 +215,7 @@ namespace System.Data.MonetDb
         /// <returns></returns>
         public DataTable GetSchemaTable()
         {
-            var schema = new DataTable("SchemaTable");
-
-            return schema;
-
-            //return _connection.GetObjectSchema(_responseInfo.Columns);
-
+            return _schemaTable??(_schemaTable = GenerateSchemaTable());
         }
 
         /// <summary>
@@ -72,6 +235,13 @@ namespace System.Data.MonetDb
             var flag = _responeInfoEnumerator.MoveNext();
             _responseInfo = _responeInfoEnumerator.Current;
             _enumerator = _responseInfo.Data.GetEnumerator();
+
+            // we need to regenerate schema table for next result set
+            if (_schemaTable != null)
+            {
+                _schemaTable = GenerateSchemaTable();
+            }
+
             return flag;
         }
 
@@ -103,7 +273,9 @@ namespace System.Data.MonetDb
         {
             while (_responeInfoEnumerator.MoveNext())
             {
-                while (_enumerator.MoveNext()) ;
+                while (_enumerator.MoveNext())
+                {
+                }
                 _enumerator.Dispose();
             }
             _responeInfoEnumerator.Dispose();

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Data.MonetDb.Helpers.Mapi.Enums;
 using System.Data.MonetDb.Helpers.Mapi.IO;
 using System.Data.MonetDb.Helpers.Mapi.Protocols;
 using System.IO;

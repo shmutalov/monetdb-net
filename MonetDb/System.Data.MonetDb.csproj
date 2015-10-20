@@ -61,6 +61,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Constants\MonetDbSchemaTableColumns.cs" />
+    <Compile Include="Enums\MonetDbFunctionType.cs" />
+    <Compile Include="Extensions\TypeExt.cs" />
     <Compile Include="Extensions\EnumerableExt.cs" />
     <Compile Include="Extensions\FormatExt.cs" />
     <Compile Include="Extensions\MonetExt.cs" />
@@ -76,6 +79,13 @@
     <Compile Include="Helpers\Mapi\Protocols\MapiProtocolVersion9.cs" />
     <Compile Include="Helpers\MonetDbMetaData.cs" />
     <Compile Include="Helpers\Mapi\MapiSocket.cs" />
+    <Compile Include="Models\MonetDbCatalogInfoModel.cs" />
+    <Compile Include="Models\MonetDbColumnInfoModel.cs" />
+    <Compile Include="Models\MonetDbFunctionInfoModel.cs" />
+    <Compile Include="Models\MonetDbProcedureInfoModel.cs" />
+    <Compile Include="Models\MonetDbSchemaInfoModel.cs" />
+    <Compile Include="Models\MonetDbTableInfoModel.cs" />
+    <Compile Include="Models\MonetDbTableTypeInfoModel.cs" />
     <Compile Include="MonetDbCommand.cs" />
     <Compile Include="MonetDbConnection.cs" />
     <Compile Include="MonetDbConnectionFactory.cs" />

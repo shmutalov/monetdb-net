@@ -1,4 +1,4 @@
-namespace System.Data.MonetDb
+namespace System.Data.MonetDb.Helpers.Mapi.Enums
 {
     /// <summary>
     /// Represents the types of data sequences that can be returned from a MonetDB server.

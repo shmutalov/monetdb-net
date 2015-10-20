@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Data.MonetDb.Extensions;
-using System.Linq;
+﻿using System.Data.MonetDb.Extensions;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace System.Data.MonetDb.Helpers.Mapi.Protocols
 {

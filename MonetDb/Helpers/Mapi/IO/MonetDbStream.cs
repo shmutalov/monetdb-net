@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Data.MonetDb.Helpers.Mapi.Enums;
+using System.IO;
 
 namespace System.Data.MonetDb.Helpers.Mapi.IO
 {

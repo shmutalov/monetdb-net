@@ -57,8 +57,9 @@ namespace System.Data.MonetDb.Helpers.Mapi
         private static List<MonetDbColumnInfo> GetColumnInfo(List<string> headerInfo)
         {
             var list = new List<MonetDbColumnInfo>();
+            var infoLines = headerInfo.Select(SplitColumnInfoLine);
 
-            foreach (var infoLine in headerInfo.Select(SplitColumnInfoLine))
+            foreach (var infoLine in infoLines)
             {
                 if (list.Count == 0)
                     list.AddRange(infoLine.Value.Select(ci => new MonetDbColumnInfo()));

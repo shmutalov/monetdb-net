@@ -25,13 +25,8 @@ namespace MonetDbTest
     [TestFixture]
     public class MonetDbConnectionTest
     {
-        /// <summary>
-        /// This connection string is based on the VOC test database that can be found 
-        /// on the MonetDB website and loading it into the "demo" database.  Following
-        /// the "Getting Started" instructions on the MonetDB website will set up the environment 
-        /// correctly for these tests to run.
-        /// </summary>
-        private const string TestConnectionString = "host=127.0.0.1;port=50000;username=monetdb;password=monetdb;database=demo;";
+        private const string TestConnectionString =
+            "host=127.0.0.1;port=50000;username=monetdb;password=monetdb;database=demo;";
 
         [Test]
         public void TestConnect()
@@ -44,7 +39,8 @@ namespace MonetDbTest
                 connection.Open();
             }
             catch (InvalidOperationException)
-            { }
+            {
+            }
 
             connection = new MonetDbConnection(TestConnectionString);
             connection.Open();
@@ -124,7 +120,8 @@ namespace MonetDbTest
                 Assert.IsTrue(conn.State == ConnectionState.Open);
 
                 conn.ChangeDatabase("demo2");
-            }, "This should throw a message that the database doesn't exist, but it's successfully changing the database name and reconnecting if it's doing so");
+            },
+                "This should throw a message that the database doesn't exist, but it's successfully changing the database name and reconnecting if it's doing so");
         }
 
         [Test]
@@ -182,12 +179,43 @@ namespace MonetDbTest
 
                     // select from
                     command.CommandText = selectScript;
-                    var value2 = (int)command.ExecuteScalar();
+                    var value2 = (int) command.ExecuteScalar();
                     Assert.AreEqual(value, value2);
 
                     // drop table
                     command.CommandText = dropScript;
                     command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        [Test]
+        public void TestSchemaTable()
+        {
+            var query = "SELECT * FROM env();";
+
+            using (var connection = new MonetDbConnection(TestConnectionString))
+            {
+                connection.Open();
+
+                using (var command = connection.CreateCommand())
+                {
+                    // create table
+                    command.CommandText = query;
+
+                    using (var reader = command.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            var schema = reader.GetSchemaTable();
+
+                            Assert.IsNotNull(schema);
+                            Assert.IsTrue(schema.Columns.Contains("name"));
+                            Assert.IsTrue(schema.Columns.Contains("value"));
+                            Assert.AreEqual(typeof (string), schema.Columns["name"].DataType);
+                            Assert.AreEqual(typeof (string), schema.Columns["value"].DataType);
+                        }
+                    }
                 }
             }
         }
